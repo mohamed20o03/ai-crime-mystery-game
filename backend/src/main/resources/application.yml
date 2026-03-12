@@ -1,0 +1,22 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: the-crime
+
+# Gemini AI Configuration
+gemini:
+  api-key: AIzaSyDT-rrJR62J01L8JeRybsQwdmxrXuuPT7A
+  model: gemini-2.5-flash
+  base-url: https://generativelanguage.googleapis.com/v1beta
+
+# Game Configuration
+game:
+  max-players: 8
+  min-players: 2
+  room-code-length: 6
+
+# CORS
+cors:
+  allowed-origins: http://localhost:3000
