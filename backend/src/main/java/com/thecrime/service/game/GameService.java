@@ -397,26 +397,16 @@ public class GameService {
         var pkg = player.getPlayerPackage();
         int totalClues = pkg.getPrivateClues() != null ? pkg.getPrivateClues().size() : 0;
         
-        List<String> clues;
-        List<String> fellowCriminals = null;
+        List<String> clues = player.getRevealedClues().stream()
+                .map(com.thecrime.domain.model.PlayerClue::getClue)
+                .toList();
         
+        List<String> fellowCriminals = null;
         if (player.getRole() == PlayerRole.CRIMINAL) {
-            // Criminals get misleading messages instead of real clues
-            int revealedCount = player.getRevealedClueCount();
-            clues = new ArrayList<>();
-            for (int i = 0; i < revealedCount; i++) {
-                clues.add(CRIMINAL_CLUE_MESSAGE);
-            }
-            
             // Criminals know each other
             fellowCriminals = room.getCriminals().stream()
                     .filter(c -> !c.getId().equals(player.getId()))
                     .map(Player::getName)
-                    .toList();
-        } else {
-            // Innocents get their real revealed clues (extract text from PlayerClue)
-            clues = player.getRevealedClues().stream()
-                    .map(com.thecrime.domain.model.PlayerClue::getClue)
                     .toList();
         }
         

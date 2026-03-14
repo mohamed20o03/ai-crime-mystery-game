@@ -42,41 +42,46 @@ public class ScenarioGeneratorService {
     );
 
     private static final String SYSTEM_PROMPT = """
-        إنت مدير لعبة لغز الجريمة على طراز أجاثا كريستي وشيرلوك هولمز.
-        شغلتك إنك تعمل سيناريو جريمة محكم وتوزع المعلومات على اللعيبة.
-
-        ## ⚠️ مهم جداً — اللهجة:
-        كل الكلام لازم يبقى بالعامية المصرية. متستخدمش فصحى أبداً.
-        أمثلة: "شاف" مش "رأى"، "راح" مش "ذهب"، "عشان" مش "لأن"
+        You are an interactive Murder Mystery Game Master.
+        Your task is to author a highly detailed crime scenario, suspect characters, clues, and testimonies.
 
         ═══════════════════════════════════════════════════════════
-        ## 🎩 أسلوب أجاثا كريستي وشيرلوك هولمز — إلزامي!
+        ## 🇪🇬 ABSOLUTE CRITICAL CONSTRAINT: Egyptian Arabic Only!
+        ═══════════════════════════════════════════════════════════
+        - Every single output string (the story, testimonies, clues, reasons) MUST be written in 100% natural Egyptian Arabic dialect (العامية المصرية).
+        - 🚨 EXCEPTION FOR NAMES 🚨: The player names provided to you will be English markers like "PLAYER_A", "PLAYER_B". You MUST use these EXACT English markers as their names in the Arabic text. DO NOT translate the markers into Arabic!
+        - Modern Standard Arabic (الفصحى) is STRICTLY FORBIDDEN.
+        - Use daily, convincing Egyptian vocabulary and slang.
+        - Examples: use "شاف" not "رأى", "راح" not "ذهب", "عشان" not "لأن".
+
+        ═══════════════════════════════════════════════════════════
+        ## 🎩 Agatha Christie & Sherlock Holmes Style — Mandatory!
         ═══════════════════════════════════════════════════════════
 
-        ### ١. كل شخص يبان مشبوه:
-        - كل بريء لازم عنده دافع حقيقي وقوي يخلي الناس يشكوا فيه
-        - بس في نفس الوقت في دليل بيبرئه لو الناس فكروا صح
-        - المجرم يبان محبوب وهادي — دوافعه الحقيقية مدفونة تحت السطح
+        ### 1. Everyone Looks Suspicious:
+        - Every innocent player MUST have a real, strong motive that makes others suspect them.
+        - However, there must also be a clue that clears them if players deduce it correctly.
+        - The criminal should appear liked and calm — their true motives buried deep beneath the surface.
 
-        ### ٢. سلسلة الاستنتاج — ديناميكية حسب عدد اللاعبين:
-        - عدد الجولات = عدد الأبرياء + ١ (الأخيرة دايماً للمجرم)
-        - الجولة الأولى دايماً: كل لاعب عنده دليل بيشاور على شخص مختلف — الكل مشكوك فيه
-        - الجولات الوسطى (لو موجودة): أدلة البراءة بتبرئ الأبرياء واحد واحد
-        - الجولة الأخيرة دايماً: الـ alibi بتاع المجرم بينهار والأدلة عليه تتجمع
-        - مثال ٣ لاعبين (٢ بريء): جولة ١ توزيع الشبهة → جولة ٢ البريء يتبرأ → جولة ٣ المجرم
-        - مثال ٦ لاعبين (٥ بريء): جولة ١ توزيع → جولات ٢-٥ برايا واحد واحد → جولة ٦ المجرم
+        ### 2. Deduction Chain — Dynamic by Player Count:
+        - Number of rounds = number of innocents + 1 (the final round is always for the criminal).
+        - Round 1 always: Every player holds a clue pointing to a different person — everyone is a suspect.
+        - Middle rounds (if any): Innocence clues emerge, clearing innocents one by one.
+        - Final round always: The criminal's alibi collapses and evidence against them accumulates.
+        - Example for 3 players (2 innocents): Round 1 distribute suspicion → Round 2 clear an innocent → Round 3 criminal.
+        - Example for 6 players (5 innocents): Round 1 distribute suspicion → Rounds 2-5 clear innocents one by one → Round 6 criminal.
 
-        ### ٣. الأدلة المادية الصغيرة:
-        - كل دليل لازم يكون مستخرج من حدث حصل فعلاً في القصة
-        - ممنوع أي دليل يكون مش موجود أصله في السرد
-        - أمثلة: وقت محدد، مكان محدد، جملة اتقالت، حاجة اتشافت
+        ### 3. Small Tangible Evidence:
+        - Every clue must be extracted from an event that actually occurred in the story.
+        - Inventing clues that have no origin in the narrative is strictly forbidden.
+        - Examples: a specific time, a specific place, a spoken sentence, something seen.
 
-        ### ٤. الأسرار الشخصية:
-        - كل بريء عنده سر شخصي مش علاقة له بالجريمة بيخليه يبان أكتر مشبوهية
-        - أمثلة: بيسرق فلوس صغيرة، علاقة سرية، بيغطي دين
+        ### 4. Personal Secrets:
+        - Every innocent has a personal secret unrelated to the crime that makes them look more suspicious.
+        - Examples: petty theft, a secret relationship, covering a debt.
 
-        ### ٥. لغز الـ Alibi:
-        - المجرم عنده alibi يبدو قوي — بس فيه ثغرة واحدة بتظهر بس بمقارنة شهادتين
+        ### 5. The Alibi Puzzle:
+        - The criminal has an alibi that seems strong — but it has a single flaw that only becomes visible when comparing two testimonies.
         """;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -85,22 +90,47 @@ public class ScenarioGeneratorService {
 
     public void generateScenario(GameRoom room, List<String> playerNames, Consumer<Boolean> callback) {
         try {
+            // ── 0. Create English Markers Mapping ────────────────────────
+            Map<String, String> markerToName = new java.util.LinkedHashMap<>();
+            List<String> markerNames = new java.util.ArrayList<>();
+            char letter = 'A';
+            for (String name : playerNames) {
+                String marker = "PLAYER_" + letter++;
+                markerToName.put(marker, name);
+                markerNames.add(marker);
+            }
+            log.info("Mapped players to markers: {}", markerToName);
+
             // ── Call 1: Full narrative story ────────────────────────────
             log.info("[Step 1/3] Generating full narrative story...");
-            JsonNode foundation = callAndParse(buildFoundationPrompt(room, playerNames));
+            String foundationRaw = extractJson(callGeminiApi(buildFoundationPrompt(room, markerNames)));
+            JsonNode foundationWithMarkers = objectMapper.readTree(foundationRaw);
             log.info("[Step 1/3] Foundation generated.");
-            log.info("===== FOUNDATION JSON =====\n{}", foundation.toPrettyString());
 
             // ── Call 2: Extract clues FROM the story ────────────────────
             log.info("[Step 2/3] Extracting clues from story...");
-            JsonNode clues = callAndParse(buildCluesPrompt(foundation, playerNames)); 
+            String cluesRaw = extractJson(callGeminiApi(buildCluesPrompt(foundationWithMarkers, markerNames))); 
+            JsonNode cluesWithMarkers = objectMapper.readTree(cluesRaw);
             log.info("[Step 2/3] Clues generated.");
-            log.info("===== CLUES JSON =====\n{}", clues.toPrettyString());
 
             // ── Call 3: Testimonies built around hooks ───────────────────
             log.info("[Step 3/3] Generating testimonies...");
-            JsonNode testimonies = callAndParse(buildTestimoniesPrompt(foundation, clues));
+            String testimoniesRaw = extractJson(callGeminiApi(buildTestimoniesPrompt(foundationWithMarkers, cluesWithMarkers)));
             log.info("[Step 3/3] Testimonies generated.");
+
+            // ── Reverse map markers back to Arabic names ─────────────────
+            for (Map.Entry<String, String> entry : markerToName.entrySet()) {
+                foundationRaw = foundationRaw.replace(entry.getKey(), entry.getValue());
+                cluesRaw = cluesRaw.replace(entry.getKey(), entry.getValue());
+                testimoniesRaw = testimoniesRaw.replace(entry.getKey(), entry.getValue());
+            }
+
+            JsonNode foundation = objectMapper.readTree(foundationRaw);
+            JsonNode clues = objectMapper.readTree(cluesRaw);
+            JsonNode testimonies = objectMapper.readTree(testimoniesRaw);
+
+            log.info("===== FOUNDATION JSON =====\n{}", foundation.toPrettyString());
+            log.info("===== CLUES JSON =====\n{}", clues.toPrettyString());
             log.info("===== TESTIMONIES JSON =====\n{}", testimonies.toPrettyString());
 
             // ── Assemble everything into PlayerPackages ──────────────────
@@ -141,45 +171,74 @@ public class ScenarioGeneratorService {
             : "عدد المجرمين: ١";
 
         return String.format("""
-            اكتب قصة جريمة قتل كاملة بالعامية المصرية بأسلوب أجاثا كريستي للبيانات دي:
-            - اللعيبة: %s
-            - المكان: %s
+            Write a complete murder mystery story in Agatha Christie style for these details:
+            - Players (THESE ARE SURVIVING SUSPECTS, DO NOT KILL THEM): %s
+            - The Crime Place / Setting: %s
             - %s
 
-            ## القواعد الإلزامية للقصة:
+            ## Mandatory Story Rules:
 
-            ### أولاً — القصة السردية (Scenario Refinement & Timeline):
-            - اكتب قصة سردية كاملة بالتسلسل الزمني، زي رواية قصيرة
-            - سد أي ثغرات منطقية قد تكون موجودة في القصة عشان تكون محكمة تماماً
-            - كل حدث فيه: الوقت بالدقيقة، المكان، مين كان فين، إيه اللي حصل بالظبط
-            - القصة لازم تشرح الدوافع الكاملة لكل شخص
-            - كل لاعب بريء لازم يكون عنده:
-              * دافع حقيقي وقوي يخليه يبان مشبوه (حاجة حصلت فعلاً في القصة)
-              * alibi صلب يبرئه لو الناس ربطوا الأدلة صح
-              * سر شخصي مش علاقة له بالجريمة بس بيضيف شبهة
+            ### First — Narrative Story (Scenario Refinement & Timeline):
+            - Write a complete chronological narrative story, like a short novel.
+            - 🚨 INVENT a fictional Non-Player Character (NPC) to be the victim. DO NOT kill any of the provided players.
+            - 🚨 ALL provided players must be alive, must be suspects, and MUST be included in the `players` JSON object.
+            - Fill in any logical loopholes in the story so it is completely watertight.
+            - Every event must include: the exact minute, the location, who was where, and exactly what happened.
+            - The story must fully explain the motives of every person.
+            - Every innocent player must have:
+              * A real, strong motive that makes them look suspicious (something that actually happens in the story).
+              * A solid alibi that clears them if players connect the clues correctly.
+              * A personal secret completely unrelated to the crime but adds suspicion.
 
-            ### تانياً — بيانات اللاعبين (players):
-            لكل لاعب:
-            - role: "criminal" أو "innocent"
-            - characterDescription: وصف الشخصية وعلاقتها بالضحية
-            - suspicionReason: الدافع القوي اللي بيخليه يبان مشبوه أو السر الشخصي
-            - personalSecret: السر الشخصي الزيادة (للأبرياء)
-            - alibi: مين وأمتى كان معاه (للأبرياء) — لازم يكون في القصة
-            - للمجرم: coverStory, alibiCrack, tacticalNote, knowledgeAboutOthers
-            - للأبرياء: location (وقت الجريمة), blindSpot (حاجة مش شافها)
+            ### Second — Player Data (players):
+            For each player:
+            - role: exactly "criminal" or "innocent"
+            - characterDescription: character's description and relationship to the victim
+            - suspicionReason: the strong motive or personal secret making them look suspicious
+            - personalSecret: the additional personal secret (for innocents)
+            - alibi: who they were with and when (for innocents) — this must exist in the story
+            - For criminals: coverStory, alibiCrack, tacticalNote, knowledgeAboutOthers
+            - For innocents: location (at the time of the crime), blindSpot (something they couldn't see)
 
-            ### تالتاً — ملخص سري للـ Game Master (master_timeline):
-            - يوضح التسلسل الزمني الدقيق للجريمة خطوة بخطوة بالدقائق
+            ### Third — Secret Game Master Summary (master_timeline):
+            - Explain the exact chronological sequence of the crime step-by-step in minutes.
 
-            الرد JSON بس، بالعامية المصرية، بدون أي نص زيادة.
-            الـ JSON لازم يحتوي على: fullNarrative, setting, crimeBriefing, groundTruth, master_timeline, players
-
-            ⚠️ مهم جداً: الـ players لازم يكون JSON object — كل مفتاح هو اسم اللاعب بالظبط:
-            مثال:
-            "players": {
-                "%s": {"role": "...", "characterDescription": "...", ...}
+            Return ONLY JSON matching this EXACT structure:
+            {
+              "fullNarrative": "...",
+              "setting": "...",
+              "crimeBriefing": "...",
+              "groundTruth": "...",
+              "master_timeline": [
+                {
+                  "event": "description of what happened",
+                  "player_positions": {
+                    "player1": "what they were doing/seeing",
+                    "player2": "what they were doing/seeing"
+                  }
+                }
+              ],
+              "players": {
+                "%s": {
+                  "role": "...",
+                  "characterDescription": "...",
+                  "suspicionReason": "...",
+                  "personalSecret": "...",
+                  "alibi": "...",
+                  "coverStory": "...",
+                  "alibiCrack": "...",
+                  "tacticalNote": "...",
+                  "knowledgeAboutOthers": "...",
+                  "location": "...",
+                  "blindSpot": "..."
+                }
+              }
             }
-            ممنوع تستخدم array أو أسماء تانية زي "اللاعب الأول" — لازم اسم اللاعب الحقيقي.
+
+            ⚠️ CRITICAL RULES BEFORE YOU RESPOND:
+            1. All text values (story, motives, secrets) MUST BE WRITTEN IN PURE EGYPTIAN ARABIC (العامية المصرية).
+            2. Using Modern Standard Arabic (الفصحى) will cause an IMMEDIATE FAILURE.
+            3. The `players` field MUST be a JSON object where each key is the EXACT player name. Do NOT use arrays for players.
             """,
             String.join("، ", playerNames),
             playerNames.get(0),
@@ -193,74 +252,106 @@ public class ScenarioGeneratorService {
         String playersStr = String.join("، ", playerNames);
         
         return String.format("""
-            بناءً على القصة دي:
+            Based on this story:
             %s
 
-            ## المطلوب: استخرج الأدلة المادية الملموسة (Tangible Evidence) من القصة.
-            ⚠️ ممنوع تخترع أي معلومة مش موجودة فعلاً في السرد.
+            ## Task: Extract Tangible Physical Evidence from the story.
+            ⚠️ DO NOT invent any information that does not explicitly exist in the narrative.
 
-            ### القواعد الإلزامية للأدلة:
-            - كل تصنيف (type) إلزامي: CRIMINAL أو SUSPICION أو ALIBI أو RED_HERRING.
-            - ابتكر من 3 إلى 5 أدلة مادية ملموسة (مثلاً إيصال مطعم، طين على حذاء، رسالة نص محترقة، قطعة قماش، بصمة روچ).
-            - لا تجعل الأدلة تفضح القاتل بشكل مباشر وسهل.
-            - كل دليل مادي لازم يربط شخصية معينة بمسرح الجريمة أو ينفي عنها حجة غيابها (Alibi).
-            - النص جوا الدليل (clue) لازم يشرح الدليل اتمسك فين، وإيه الدلالة الخفية بتاعته.
+            ### Mandatory Rules for Clues:
+            - The `type` classification is mandatory: CRIMINAL, SUSPICION, ALIBI, or RED_HERRING.
+            - Create 3 to 5 tangible physical clues (e.g., a restaurant receipt, mud on a shoe, a burnt text message, a piece of fabric, a lipstick smudge).
+            - Do not make the clues expose the killer directly or easily.
+            - Every physical clue must link a specific character to the crime scene or disprove their alibi.
+            - The text inside the `clue` field MUST explain where the evidence was found and its hidden significance.
 
-            ### قواعد التوزيع:
-            - كل بريء لازم عنده SUSPICION clue واحد على الأقل
-            - كل SUSPICION clue لازم يقابله ALIBI clue يبرئ صاحبه
-            - الـ ALIBI لازم يكون عند لاعب تاني (مش صاحب الـ SUSPICION)
-            - الأدلة CRIMINAL لازم ٣ على الأقل ومش بتظهر كلها من أول جولة
+            ### Distribution Rules:
+            - Every innocent must have at least 1 SUSPICION clue pointing to them.
+            - Every SUSPICION clue must be countered by an ALIBI clue that clears its subject.
+            - The ALIBI clue must be held by a different player (not the owner of the SUSPICION clue).
+            - There must be at least 3 CRIMINAL clues, and they cannot all appear in the first round.
+            - 🚨 🚨 CRITICAL SURVIVAL RULE: Any clue held by the actual Criminal MUST be a fake, fabricated clue (type: RED_HERRING) specifically designed to confuse others and frame innocent players. The Criminal must NEVER hold a true CRIMINAL clue that incriminates themselves. True CRIMINAL clues MUST be held by the innocent players!
 
-            ### ⚠️ قاعدة التوزيع الإلزامية — تنوع الشبهة:
-            - الأدلة لازم تتوزع من أول جولة على لاعبين مختلفين — ممنوع الأدلة الأولى كلها تشاور على نفس الشخص
-            - كل لاعب يلاقي دليله لازم يشك في شخص مختلف عن اللاعب التاني
-            - كل SUSPICION clue لبريء لازم يقابله ALIBI clue مع لاعب تاني يبرئه
+            ### ⚠️ Interactive Distribution Rules (Mandatory - Spirit of the Game):
+            1. It is STRICTLY FORBIDDEN for the `holder` to be the same as the `hook_player` for the same clue.
+            2. The goal is for a player to find a clue that concerns another player or intersects with their testimony to confront them.
+            3. Every clue must force communication and discussion between at least two different people.
+            4. Clues must be distributed among different players from round 1 — the first clues cannot all point to the same person.
+            5. Every player finding a clue must suspect a different person than another player finding their clue.
+            6. Every SUSPICION clue for an innocent must be countered by an ALIBI clue held by another player that clears them.
 
-            ### الحقول الإلزامية لكل دليل:
-            - holder: اسم اللاعب اللي هيلاقي الدليل ده (لازم يكون من اللعيبة: %s)
+            ### Mandatory Fields for Each Clue:
+            - holder: The actual name of the player who will find this clue (Must be one of the players: %s).
             - type: CRIMINAL / SUSPICION / ALIBI / RED_HERRING
-            - clue: نص الدليل المادي بضمير المتكلم (مثال: "لقيت إيصال مطعم مجعد واقع جنب الباب مكتوب عليه كذا...")
-            - targets: اسم اللاعب اللي الدليل ده بيخصه أو بيكشف كذبته
-            - hook_player: 🚨🚨 تنبيه شديد اللهجة: اسم اللاعب اللي الشهادة بتاعته هتدعم أو تكذب الدليل ده.
-              ⚠️ إلزامي وحتمي: يجب أن يكون الاسم حصرياً واحداً من هؤلاء اللاعبين فقط: [%s].
-              ممنوع نهائياً وباتاً استخدام أي شخصيات ثانوية، خدم، عمال، أو أي اسم غير موجود في القائمة السابقة.
-            - hook_sentence: الجملة اللي هتكون موجودة في شهادة الـ hook_player (⚠️ إلزامي: لازم تتكتب بصيغة المتكلم "أنا" زي: "أنا رحت كذا" مش "هو راح").
-            - chain_connects_to: اسم الدليل التاني المرتبط بيه
-            - narrative_source: الجملة من القصة اللي استخرجت منها الدليل ده
+            - clue: The text of the physical evidence in the FIRST PERSON perspective (Example: "I found a crumpled restaurant receipt dropped near the door saying...").
+            - targets: The name of the player this clue concerns or exposes as lying.
+            - hook_player: 🚨🚨 SEVERE WARNING: The name of the player whose testimony will support or contradict this clue.
+              ⚠️ MANDATORY AND CRITICAL: The name must EXCLUSIVELY be one of these players only: [%s].
+              It is strictly forbidden to use any secondary characters, servants, workers, or any name not in the previous list.
+            - hook_sentence: The exact sentence that will be present in the `hook_player`'s testimony (⚠️ Mandatory: Must be written in first-person "I" like: "I went to...", not "He went to...").
+            - chain_connects_to: The name of another related clue.
+            - narrative_source: The exact sentence from the story that this clue was extracted from.
 
-            الرد JSON بس: {"clues": [...]}
+            Return ONLY JSON matching this EXACT structure:
+            {
+              "clues": [
+                {
+                  "holder": "...",
+                  "type": "...",
+                  "clue": "...",
+                  "targets": "...",
+                  "hook_player": "...",
+                  "hook_sentence": "...",
+                  "chain_connects_to": "...",
+                  "narrative_source": "..."
+                }
+              ]
+            }
+
+            ⚠️ CRITICAL RULES BEFORE YOU RESPOND:
+            1. Every single clue description MUST BE WRITTEN IN PURE EGYPTIAN ARABIC (العامية المصرية).
+            2. Using Modern Standard Arabic (الفصحى) will cause an IMMEDIATE FAILURE.
             """,
             foundation.path("fullNarrative").asText(foundation.toString()),
-            playersStr, playersStr // نمرر الأسماء مرتين
+            playersStr, playersStr 
         );
     }
 
     private String buildTestimoniesPrompt(JsonNode foundation, JsonNode clues) {
         return String.format("""
-            بناءً على القصة والأدلة المادية دول:
+            Based on the story and these physical clues:
 
-            القصة الكاملة:
+            Full Story:
             %s
 
-            الأدلة والهوكات المطلوبة:
+            Required Clues and Hooks:
             %s
 
-            ## المطلوب: اكتب شهادات المشتبه بهم (Witness Testimonies) بالعامية المصرية.
+            ## Task: Write the Witness Testimonies for the suspects.
 
-            ### قواعد إلزامية لكل شهادة:
-            - اكتب شهادة رسمية قصيرة على لسان كل لاعب (بصيغة المتكلم) 3-4 جمل بس.
-            - كل شهادة لازززززم تحتوي على:
-              أ) حجة غيابهم (Alibi) وقت الجريمة.
-              ب) علاقتهم بالضحية.
-              ج) تناقض بسيط أو "نصف كذبة" تتقاطع مع شهادة شخصية تانية أو دليل مادي، لتثير الشك.
-            - كل شهادة لازم تحتوي بالنص (Copy & Paste) على الـ hook_sentences المطلوبة من اللاعب ده.
-            - الشهادة تبان طبيعية ومقنعة.
-            - المجرم شهادته تحتوي على cover story محكم مع ثغرة مخفية واحدة.
+            ### Mandatory Rules for Every Testimony:
+            - Write a short formal testimony spoken by each player (in the first person) — exactly 3-4 sentences long.
+            - Every testimony MUST absolutely contain:
+              a) Their Alibi at the time of the crime.
+              b) Their relationship to the victim.
+              c) A slight contradiction or "half-truth" that intersects with another character's testimony or a physical clue, to arouse suspicion.
+            - Every testimony MUST contain EXACTLY (Copy & Paste) all the requested `hook_sentences` for this player.
+            - The testimony must sound natural and convincing.
+            - The criminal's testimony must contain a tight cover story with a single hidden flaw.
 
-            ⚠️ مهم: استخدم أسماء اللعيبة الحقيقية بالظبط زي ما هي في القصة.
+            ⚠️ IMPORTANT: Use the exact real player names exactly as they are in the story.
 
-            الرد JSON بس: {"testimonies": {"اسم اللاعب": "الشهادة..."}}
+            Return ONLY JSON matching this EXACT structure:
+            {
+              "testimonies": {
+                "Player Name 1": "The testimony...",
+                "Player Name 2": "The testimony..."
+              }
+            }
+
+            ⚠️ CRITICAL RULES BEFORE YOU RESPOND:
+            1. Every single testimony MUST BE WRITTEN IN PURE EGYPTIAN ARABIC (العامية المصرية).
+            2. Using Modern Standard Arabic (الفصحى) will cause an IMMEDIATE FAILURE.
             """,
             foundation.path("fullNarrative").asText(foundation.toString()),
             clues.toString()
@@ -387,6 +478,11 @@ public class ScenarioGeneratorService {
             ? PlayerRole.CRIMINAL : PlayerRole.INNOCENT;
         player.setRole(role);
 
+        if (role == PlayerRole.CRIMINAL && clues != null) {
+            String warning = "⚠️ تنبيه: الدليل متفبرك، القرار ليك إنك تستخدمه أو تخترع واحد.\\n\\n";
+            clues.forEach(c -> c.setClue(warning + c.getClue()));
+        }
+
         player.setPlayerPackage(PlayerPackage.builder()
             .role(role)
             .characterDescription(info.path("characterDescription").asText(null))
@@ -496,6 +592,15 @@ public class ScenarioGeneratorService {
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
+    private String normalizeArabic(String s) {
+        if (s == null) return "";
+        return s.replaceAll("[أإآ]", "ا")
+                .replaceAll("ة", "ه")
+                .replaceAll("ى", "ي")
+                .replaceAll("[\\p{Mn}]", "") // Remove diacritics
+                .toLowerCase();
+    }
+
     private Optional<Player> findPlayer(GameRoom room, String name) {
         String key = name.trim().replaceAll("\\s+", " ");
         // Exact match first
@@ -504,11 +609,13 @@ public class ScenarioGeneratorService {
             .findFirst();
         if (exact.isPresent()) return exact;
 
-        // Fuzzy: contains-based fallback
+        // Fuzzy: contains-based fallback with Arabic normalization
+        String normalizedKey = normalizeArabic(key);
         return room.getAllPlayers().stream()
             .filter(p -> {
                 String pName = p.getName().trim().replaceAll("\\s+", " ");
-                return pName.contains(key) || key.contains(pName);
+                String normalizedPName = normalizeArabic(pName);
+                return normalizedPName.contains(normalizedKey) || normalizedKey.contains(normalizedPName);
             })
             .findFirst();
     }
