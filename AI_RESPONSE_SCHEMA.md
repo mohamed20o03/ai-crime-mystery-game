@@ -1,159 +1,208 @@
-# AI Response JSON Schema
+# AI Response JSON Schema — 3-Step Pipeline
 
 > Part of [The Crime](README.md) — a real-time multiplayer murder mystery game powered by Gemini AI.
 
-The Gemini model returns a single JSON object (no markdown wrapper).  
+The scenario is generated through **3 sequential Gemini API calls**. Each call returns JSON with `responseMimeType: "application/json"`.  
 Every string value is in **Egyptian Arabic dialect (العامية المصرية)**.
 
 ---
 
-## Top-Level Structure
+## Step 1: Foundation Response
+
+The first call generates the complete crime narrative and character profiles.
 
 ```json
 {
-  "master_timeline": [...],
-  "crimeBriefing":   "string",
-  "timeline":        ["string", ...],
-  "groundTruth":     "string",
-  "setting":         "string",
-  "packages":        { "PlayerName": { ... }, ... }
+  "fullNarrative":    "string (complete crime story)",
+  "setting":          "string",
+  "crimeBriefing":    "string (public summary — no spoilers)",
+  "groundTruth":      "string (who did it and why)",
+  "master_timeline":  [...],
+  "players": {
+    "محمد": { "role": "innocent", ... },
+    "سارة": { "role": "criminal", ... }
+  }
 }
 ```
 
-| Field             | Type            | Visible to players?      | Description                                               |
-| ----------------- | --------------- | ------------------------ | --------------------------------------------------------- |
-| `master_timeline` | Array of events | ❌ Never                 | Full chain-of-thought timeline. Stored server-side only.  |
-| `crimeBriefing`   | String          | ✅ Everyone              | Public crime summary. Does NOT reveal the criminal.       |
-| `timeline`        | String[]        | ✅ Everyone              | 4–6 short reference events shown on the briefing screen.  |
-| `groundTruth`     | String          | ❌ Revealed at game over | Full truth: who did it, how, and why.                     |
-| `setting`         | String          | ✅ Everyone              | Short location description (e.g. "فندق فاخر في القاهرة"). |
-| `packages`        | Object map      | ✅ Per-player only       | Each player's private role card, testimony, and clues.    |
+| Field             | Type            | Visible to players?      | Description                                              |
+| ----------------- | --------------- | ------------------------ | -------------------------------------------------------- |
+| `fullNarrative`   | String          | ❌ Never                 | Complete story — used as input for Steps 2 & 3.          |
+| `setting`         | String          | ✅ Everyone              | Short location (e.g. "فندق فاخر في القاهرة").            |
+| `crimeBriefing`   | String          | ✅ Everyone              | Public crime summary. Does NOT reveal the criminal.      |
+| `groundTruth`     | String          | ❌ Revealed at game over | Full truth: who did it, how, and why.                    |
+| `master_timeline` | Array of events | ❌ Never                 | Chronological timeline. Stored server-side for debugging.|
+| `players`         | Object map      | ✅ Per-player only       | Player profiles keyed by real player name.               |
 
----
+### `players` — Player Profile Object
 
-## `master_timeline` — Event Object
-
-The hidden chain-of-thought. Contains 6–10 chronological events.  
-Every clue and testimony in `packages` **must** trace back to an event here.
+Keys are **exact player names** as provided by the room.  
+⚠️ The prompt enforces JSON object format (not array).
 
 ```json
 {
-  "master_timeline": [
-    {
-      "event": "لما النور قطع: أحمد كان في المطبخ وسارة كانت على السلم",
-      "player_positions": {
-        "أحمد": "في المطبخ جنب أوضة الضحية — يقدر يسمع أي حاجة من جوا",
-        "سارة": "على السلم — تقدر تسمع خطوات من ناحية المطبخ",
-        "كريم": "في الصالة مع محمد — شاف ضل بيتحرك في الممر",
-        "محمد": "في الصالة مع كريم — سمع صوت حاجة اتكسرت"
-      }
-    }
-  ]
-}
-```
-
-| Field              | Type         | Description                                                           |
-| ------------------ | ------------ | --------------------------------------------------------------------- |
-| `event`            | String       | Human-readable description of what happened at this moment.           |
-| `player_positions` | Object (map) | Key = player name. Value = where they were, what they could see/hear. |
-
----
-
-## `packages` — Per-Player Package Object
-
-Keys are **exact player names** as provided to the AI.  
-Each player receives their own package privately over WebSocket.
-
-```json
-{
-  "packages": {
+  "players": {
     "سارة": {
       "role": "innocent",
-      "characterDescription": "string",
-      "suspicionReason": "string",
-      "mustSayTestimony": "string",
-      "privateClues": ["string", "string", "string", "string"],
-      "coverStory": null,
-      "physicalState": null,
-      "tacticalNote": null,
-      "location": "string",
-      "blindSpot": "string",
-      "knowledgeAboutOthers": null
+      "characterDescription": "وصف الشخصية وعلاقتها بالضحية",
+      "suspicionReason": "الدافع القوي اللي بيخليه يبان مشبوه",
+      "personalSecret": "سر شخصي مش علاقة بالجريمة",
+      "alibi": "مع مين كان وقت الجريمة",
+      "location": "فين كان وقت الجريمة",
+      "blindSpot": "حاجة مقدرش يشوفها"
     },
     "أحمد": {
       "role": "criminal",
-      "characterDescription": "string",
-      "suspicionReason": "string",
-      "mustSayTestimony": "string",
-      "privateClues": ["string", "string", "string", "string"],
-      "coverStory": "string",
-      "physicalState": "string",
-      "tacticalNote": "string",
-      "location": null,
-      "blindSpot": null,
-      "knowledgeAboutOthers": "string"
+      "characterDescription": "...",
+      "suspicionReason": "...",
+      "coverStory": "الحجة اللي هيقولها",
+      "alibiCrack": "الثغرة في الحجة",
+      "tacticalNote": "نصيحة تكتيكية",
+      "knowledgeAboutOthers": "معلومات عن باقي اللعيبة"
     }
   }
 }
 ```
 
-### Package Fields
-
-| Field                  | Type                         | Who gets it        | Description                                                                                                                                       |
-| ---------------------- | ---------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `role`                 | `"criminal"` \| `"innocent"` | Everyone (private) | Player's role.                                                                                                                                    |
-| `characterDescription` | String                       | Everyone (private) | Who this character is, their relation to the victim, why they're a suspect.                                                                       |
-| `suspicionReason`      | String                       | Everyone (private) | The specific reason others might suspect this player.                                                                                             |
-| `mustSayTestimony`     | String                       | Everyone (private) | 3–4 sentences the player **must say out loud** during discussion. Derived from `master_timeline`.                                                 |
-| `privateClues`         | String[]                     | Everyone (private) | 3–4 circumstantial clues. One new clue revealed per round. All written in **first person** ("شفت…", "سمعت…"). All derived from `master_timeline`. |
-| `coverStory`           | String                       | 🔴 Criminal only   | Plausible alibi the criminal should stick to.                                                                                                     |
-| `physicalState`        | String                       | 🔴 Criminal only   | Guidance on body language / composure.                                                                                                            |
-| `tacticalNote`         | String                       | 🔴 Criminal only   | Strategic advice: how to cast suspicion on others.                                                                                                |
-| `location`             | String                       | 🔵 Innocent only   | Where this innocent was during the crime (from timeline).                                                                                         |
-| `blindSpot`            | String                       | 🔵 Innocent only   | What this innocent couldn't see/hear and why.                                                                                                     |
-| `knowledgeAboutOthers` | String                       | 🔴 Criminal only   | What the criminal knows about other players' positions.                                                                                           |
-
-> **Note:** Criminal fields (`coverStory`, `physicalState`, `tacticalNote`, `knowledgeAboutOthers`) are `null` for innocent players.  
-> Innocent fields (`location`, `blindSpot`) are `null` for the criminal.
+| Field                  | Type                         | Who gets it        | Description                                             |
+| ---------------------- | ---------------------------- | ------------------ | ------------------------------------------------------- |
+| `role`                 | `"criminal"` \| `"innocent"` | Everyone (private) | Player's secret role.                                   |
+| `characterDescription` | String                       | Everyone (public)  | Character background and relation to victim.            |
+| `suspicionReason`      | String                       | Everyone (public)  | Why others might suspect this player.                   |
+| `personalSecret`       | String                       | 🔵 Innocent only   | Secret unrelated to crime that adds suspicion.          |
+| `alibi`                | String                       | 🔵 Innocent only   | Who they were with during the crime.                    |
+| `location`             | String                       | 🔵 Innocent only   | Where they were during the crime.                       |
+| `blindSpot`            | String                       | 🔵 Innocent only   | What they couldn't see/hear.                            |
+| `coverStory`           | String                       | 🔴 Criminal only   | Plausible alibi to maintain.                            |
+| `alibiCrack`           | String                       | 🔴 Criminal only   | Hidden flaw in the cover story.                         |
+| `tacticalNote`         | String                       | 🔴 Criminal only   | Strategic advice on casting suspicion.                  |
+| `knowledgeAboutOthers` | String                       | 🔴 Criminal only   | What they know about other players' positions.          |
 
 ---
 
-## Clue Rules (enforced via prompt)
+## Step 2: Clues Response — Tangible Evidence
 
-| Rule                      | Details                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------- |
-| **Timeline-derived only** | Every clue must reference a fact present in `master_timeline`. No invented details.           |
-| **No smoking guns**       | No clue directly shows the murder, the murder weapon in the criminal's hand, or a confession. |
-| **Circumstantial only**   | Heard a sound, saw someone running, noticed something out of place, smelled something odd.    |
-| **First-person only**     | All clues written as "شفت…" / "سمعت…" / "لاحظت…" — never "حد شافك" or third-person.           |
-| **No self-referencing**   | A player never receives a clue about themselves from the outside.                             |
-| **Distributed puzzle**    | No single clue is enough to identify the criminal alone. Players must combine clues.          |
+The second call extracts **physical, tangible evidence** from the narrative.
+
+```json
+{
+  "clues": [
+    {
+      "holder": "محمد",
+      "type": "SUSPICION",
+      "clue": "لقيت إيصال مطعم مجعد واقع جنب الباب...",
+      "targets": "سارة",
+      "hook_player": "سارة",
+      "hook_sentence": "أنا رحت المطعم الساعة 9",
+      "chain_connects_to": "بصمة الروچ",
+      "narrative_source": "الجملة من القصة اللي الدليل مبني عليها"
+    }
+  ]
+}
+```
+
+### Clue Fields
+
+| Field               | Type   | Description                                                         |
+| ------------------- | ------ | ------------------------------------------------------------------- |
+| `holder`            | String | Player name who receives this clue. Must be a real player name.     |
+| `type`              | Enum   | `CRIMINAL`, `SUSPICION`, `ALIBI`, or `RED_HERRING`                  |
+| `clue`              | String | First-person description of tangible evidence ("لقيت...", "شفت...") |
+| `targets`           | String | Player name this clue points toward.                                |
+| `hook_player`       | String | Player whose testimony activates this clue.                         |
+| `hook_sentence`     | String | Exact sentence that must appear in `hook_player`'s testimony.       |
+| `chain_connects_to` | String | Name of related clue that adds meaning when combined.               |
+| `narrative_source`  | String | Quote from the story this evidence was extracted from.              |
+
+### Clue Type Classification
+
+| Type          | Purpose                                             | Example                                |
+| ------------- | --------------------------------------------------- | -------------------------------------- |
+| `CRIMINAL`    | Points toward the actual criminal                   | Blood stain near criminal's seat       |
+| `SUSPICION`   | Makes an innocent look suspicious                   | Threatening message from innocent      |
+| `ALIBI`       | Clears an innocent's SUSPICION clue                 | Security cam showing they were away    |
+| `RED_HERRING` | Misleading evidence that wastes investigation time  | Unrelated item found at crime scene    |
+
+### Distribution Rules
+
+- Every innocent has at least 1 SUSPICION clue
+- Every SUSPICION clue is paired with an ALIBI clue held by a different player
+- At least 3 CRIMINAL clues, not all revealed in round 1
+- Suspicion distributed across all players from round 1 — no single person targeted early
 
 ---
 
-## Clue Reveal Schedule
+## Step 3: Testimonies Response
 
-Clues in `privateClues` are revealed **one per round**, in order:
+The third call generates first-person witness statements with embedded hooks.
+
+```json
+{
+  "testimonies": {
+    "محمد": "أنا كنت في المطبخ الساعة 10... أنا رحت المطعم الساعة 9...",
+    "سارة": "أنا كنت في أوضتي...",
+    "أحمد": "أنا كنت مع كريم في الصالة..."
+  }
+}
+```
+
+| Field          | Type         | Description                                        |
+| -------------- | ------------ | -------------------------------------------------- |
+| `testimonies`  | Object (map) | Key = player name, Value = testimony string.       |
+
+### Testimony Requirements
+
+Each testimony (3-4 sentences) must contain:
+- **Alibi** — where they were during the crime
+- **Relationship** — their connection to the victim
+- **Contradiction** — subtle "half-lie" that cross-references another testimony or clue
+- **Hook sentences** — exact phrases from Step 2's `hook_sentence` fields (copy-pasted)
+
+---
+
+## How the Backend Assembles Packages
+
+```
+Step 1 JSON ──► players{} → role, characterDescription, alibi, etc.
+Step 2 JSON ──► clues[] → matched to players by `holder` name (fuzzy matching)
+Step 3 JSON ──► testimonies{} → matched to players by name
+                    │
+                    ▼
+              PlayerPackage per player
+              (stored in-memory, never fully sent to clients)
+```
+
+### Clue Matching Logic
+
+The backend uses **fuzzy matching** for clue `holder` → player:
+1. Exact string match
+2. Contains-based fallback (handles "أحمد" vs "أحمد المصري")
+3. Array index fallback (when LLM returns nameless array)
+
+---
+
+## What the Server Sends to Clients
+
+The backend (`GameService.sendPlayerPackage`) filters data before sending:
+
+| Field                  | Sent to criminal?                         | Sent to innocent?    |
+| ---------------------- | ----------------------------------------- | -------------------- |
+| `role`                 | ✅                                        | ✅                   |
+| `characterDescription` | ✅                                        | ✅                   |
+| `mustSayTestimony`     | ✅                                        | ✅                   |
+| `privateClues`         | ❌ Replaced with misleading message       | ✅ Real clues        |
+| `totalClueCount`       | ✅ (shows X of Y)                         | ✅                   |
+| `fellowCriminals`      | ✅ (names of co-criminals)                | ❌ null              |
+| `master_timeline`      | ❌ Never                                  | ❌ Never             |
+| `groundTruth`          | ❌ Only at GAME_OVER                      | ❌ Only at GAME_OVER |
+
+### Clue Reveal Schedule
+
+Clues are revealed **one per round** via `revealNextClue()`:
 
 | Round | Clues revealed per player |
 | ----- | ------------------------- |
-| 1     | `privateClues[0]`         |
-| 2     | `privateClues[0–1]`       |
-| 3     | `privateClues[0–2]`       |
-| 4+    | `privateClues[0–3]` (all) |
-
----
-
-## What the Server Strips Before Sending
-
-The backend (`GameService.sendPlayerPackage`) **replaces** criminal clues with a misleading message and **never** sends `master_timeline` or `groundTruth` to clients during the game:
-
-| Field                  | Sent to criminal?                | Sent to innocent?    |
-| ---------------------- | -------------------------------- | -------------------- |
-| `role`                 | ✅                               | ✅                   |
-| `characterDescription` | ✅                               | ✅                   |
-| `mustSayTestimony`     | ✅                               | ✅                   |
-| `privateClues`         | ❌ Replaced with mislead message | ✅ Real clues        |
-| `fellowCriminals`      | ✅ (names of co-criminals)       | ❌ null              |
-| `master_timeline`      | ❌ Never                         | ❌ Never             |
-| `groundTruth`          | ❌ Only at GAME_OVER             | ❌ Only at GAME_OVER |
+| 1     | 1st clue                  |
+| 2     | 1st + 2nd clue            |
+| 3     | 1st + 2nd + 3rd clue      |
+| 4+    | All clues                 |

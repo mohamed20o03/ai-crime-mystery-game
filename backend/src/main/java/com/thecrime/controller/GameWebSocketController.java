@@ -53,8 +53,12 @@ public class GameWebSocketController {
             @Payload Map<String, String> payload
     ) {
         String playerId = payload.get("playerId");
+        int criminalCount = 1;
         try {
-            gameService.startGame(roomCode, playerId);
+            criminalCount = Integer.parseInt(payload.getOrDefault("criminalCount", "1"));
+        } catch (NumberFormatException ignored) {}
+        try {
+            gameService.startGame(roomCode, playerId, criminalCount);
         } catch (Exception e) {
             log.error("Error starting game", e);
             webSocketService.broadcastToRoom(roomCode, WebSocketMessage.error(e.getMessage()));
@@ -169,6 +173,20 @@ public class GameWebSocketController {
             gameService.continueAfterElimination(roomCode, playerId);
         } catch (Exception e) {
             log.error("Error continuing after elimination", e);
+            webSocketService.broadcastToRoom(roomCode, WebSocketMessage.error(e.getMessage()));
+        }
+    }
+    
+    @MessageMapping("/room/{roomCode}/close")
+    public void closeRoom(
+            @DestinationVariable String roomCode,
+            @Payload Map<String, String> payload
+    ) {
+        String playerId = payload.get("playerId");
+        try {
+            gameService.closeRoom(roomCode, playerId);
+        } catch (Exception e) {
+            log.error("Error closing room", e);
             webSocketService.broadcastToRoom(roomCode, WebSocketMessage.error(e.getMessage()));
         }
     }

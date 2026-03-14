@@ -13,7 +13,4 @@ public class CreateRoomRequest {
     private String setting;
     
     private String language = "Arabic";
-    
-    // Number of criminals (default 1)
-    private int criminalCount = 1;
 }

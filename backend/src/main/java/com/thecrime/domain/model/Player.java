@@ -43,11 +43,11 @@ public class Player {
     /**
      * Get only the clues revealed so far (gradual reveal)
      */
-    public List<String> getRevealedClues() {
+    public List<PlayerClue> getRevealedClues() {
         if (playerPackage == null || playerPackage.getPrivateClues() == null) {
             return new ArrayList<>();
         }
-        List<String> allClues = playerPackage.getPrivateClues();
+        List<PlayerClue> allClues = playerPackage.getPrivateClues();
         return allClues.subList(0, Math.min(revealedClueCount, allClues.size()));
     }
     

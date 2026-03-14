@@ -21,6 +21,10 @@ public class PlayerPackage {
     // Why this suspect is suspicious (shown publicly)
     private String suspicionReason;
     
+    private String personalSecret;
+    
+    private String alibi;
+    
     // The mandatory testimony that must be read aloud
     private String mustSayTestimony;
     
@@ -28,15 +32,15 @@ public class PlayerPackage {
     private String location;
     
     // Private clues that can be shared voluntarily
-    private List<String> privateClues;
+    private List<PlayerClue> privateClues;
     
     // For innocents: what they missed and why
     private String blindSpot;
     
     // For criminals: cover story, tactical notes
     private String coverStory;
-    private String physicalState;
     private String tacticalNote;
+    private String alibiCrack;
     
     // What you know about others
     private String knowledgeAboutOthers;

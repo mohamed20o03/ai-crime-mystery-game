@@ -9,7 +9,6 @@ export default function CreateRoom() {
   const router = useRouter();
   const [hostName, setHostName] = useState("");
   const [setting, setSetting] = useState("");
-  const [criminalCount, setCriminalCount] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -21,7 +20,6 @@ export default function CreateRoom() {
     const result = await createRoom(
       hostName,
       setting || undefined,
-      criminalCount,
     );
 
     if (result.error) {
@@ -80,29 +78,6 @@ export default function CreateRoom() {
             maxLength={50}
             className="w-full px-4 py-3 bg-crime-primary border border-crime-light rounded-lg focus:outline-none focus:border-crime-accent text-white placeholder-gray-400"
           />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-2">عدد المجرمين</label>
-          <div className="flex gap-2">
-            {[1, 2, 3].map((count) => (
-              <button
-                key={count}
-                type="button"
-                onClick={() => setCriminalCount(count)}
-                className={`flex-1 py-3 rounded-lg font-bold text-lg transition-all border-2 ${
-                  criminalCount === count
-                    ? "bg-crime-accent/20 border-crime-accent text-crime-accent"
-                    : "bg-crime-primary border-crime-light text-gray-400 hover:border-crime-accent/50"
-                }`}
-              >
-                {count}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            الأحسن مجرم واحد لو ٤ لاعبين أو أقل، واتنين لو ٥-٧ لاعبين
-          </p>
         </div>
 
         {error && (

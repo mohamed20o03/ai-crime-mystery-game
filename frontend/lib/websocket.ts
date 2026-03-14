@@ -125,8 +125,8 @@ class GameWebSocket {
   }
 
   // Game actions
-  startGame() {
-    this.send(`/app/room/${this.roomCode}/start`, { playerId: this.playerId });
+  startGame(criminalCount: number = 1) {
+    this.send(`/app/room/${this.roomCode}/start`, { playerId: this.playerId, criminalCount: String(criminalCount) });
   }
 
   confirmBriefing() {
@@ -177,6 +177,12 @@ class GameWebSocket {
     this.send(`/app/room/${this.roomCode}/kick`, {
       playerId: this.playerId,
       targetPlayerId,
+    });
+  }
+
+  closeRoom() {
+    this.send(`/app/room/${this.roomCode}/close`, {
+      playerId: this.playerId,
     });
   }
 

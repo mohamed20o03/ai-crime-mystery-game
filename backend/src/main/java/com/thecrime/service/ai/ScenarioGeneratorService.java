@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thecrime.domain.enums.PlayerRole;
 import com.thecrime.domain.model.GameRoom;
 import com.thecrime.domain.model.Player;
+import com.thecrime.domain.model.PlayerClue;
 import com.thecrime.domain.model.PlayerPackage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,518 +18,498 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Service for generating game scenarios using Google Gemini AI.
- */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ScenarioGeneratorService {
-    
+
     private final WebClient geminiWebClient;
     private final ObjectMapper objectMapper;
-    
-    @Value("${gemini.api-key}")
-    private String apiKey;
-    
-    @Value("${gemini.model}")
-    private String model;
-    
+
+    @Value("${gemini.api-key}") private String apiKey;
+    @Value("${gemini.model}")   private String model;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Constants
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static final Map<String, Object> GENERATION_CONFIG = Map.of(
+        "temperature",      0.5,
+        "topK",             40,
+        "topP",             0.95,
+        "maxOutputTokens",  65536,
+        "responseMimeType", "application/json"
+    );
+
     private static final String SYSTEM_PROMPT = """
-        إنت مدير لعبة لغز الجريمة. شغلتك إنك تعمل سيناريو جريمة وتوزع المعلومات على اللعيبة.
-        
+        إنت مدير لعبة لغز الجريمة على طراز أجاثا كريستي وشيرلوك هولمز.
+        شغلتك إنك تعمل سيناريو جريمة محكم وتوزع المعلومات على اللعيبة.
+
         ## ⚠️ مهم جداً — اللهجة:
-        كل الكلام لازم يبقى بالعامية المصرية (اللهجة المصرية). متستخدمش فصحى أبداً.
-        اكتب زي ما المصريين بيتكلموا في حياتهم اليومية.
-        أمثلة: "شاف" مش "رأى"، "راح" مش "ذهب"، "عشان" مش "لأن"، "كان عايز" مش "كان يريد"، "مكانش" مش "لم يكن"
-        
+        كل الكلام لازم يبقى بالعامية المصرية. متستخدمش فصحى أبداً.
+        أمثلة: "شاف" مش "رأى"، "راح" مش "ذهب"، "عشان" مش "لأن"
+
         ═══════════════════════════════════════════════════════════
-        ## 🧠 الخطوة ١: تسلسل الجريمة الكامل (Master Timeline) — مهم جداً!
+        ## 🎩 أسلوب أجاثا كريستي وشيرلوك هولمز — إلزامي!
         ═══════════════════════════════════════════════════════════
-        
-        قبل ما تعمل أي شهادات أو أدلة، لازم الأول تبني "تسلسل الجريمة الكامل" (master_timeline).
-        ده زي القصة السرية الكاملة اللي كل حاجة في اللعبة هتتبني عليها.
-        
-        ### التسلسل لازم يحتوي على:
-        - ٦-١٠ أحداث مرتبة بالزمن
-        - كل حدث لازم يقول بوضوح:
-          * فين كل لاعب كان في اللحظة دي
-          * مين كان مع مين
-          * إيه اللي كل واحد فيهم كان بيعمله
-          * إيه اللي كل واحد ممكن يكون شافه أو سمعه من مكانه
-        - التسلسل لازم يوضح بالظبط:
-          * إمتى وفين الجريمة حصلت
-          * إيه اللي المجرم عمله قبل وبعد الجريمة
-          * مين كان قريب ومين كان بعيد
-          * أنهي لاعب ممكن يكون شاف أو سمع إيه (من مكانه الفعلي)
-        
-        ### مثال على حدث في التسلسل:
-        "لما النور قطع: كريم ومحمد كانوا في الصالة بيتكلموا. سارة كانت نازلة السلم.
-        أحمد (المجرم) كان في المطبخ قريب من أوضة الضحية. نور كانت في البلكونة لوحدها.
-        من مكان سارة على السلم، كانت تقدر تسمع صوت خطوات سريعة من ناحية المطبخ.
-        كريم من الصالة شاف ضل حد بيتحرك في الممر."
-        
-        ### ليه التسلسل مهم؟
-        - كل الشهادات والأدلة لازم تتسحب من التسلسل ده بس — مفيش اختراع من الفراغ
-        - لو التسلسل بيقول إن كريم ومحمد كانوا مع بعض، يبقى شهادة كريم لازم تذكر محمد وشهادة محمد لازم تذكر كريم
-        - لو سارة كانت على السلم، أدلتها لازم تبقى حاجات ممكن تشوفها أو تسمعها من السلم بس
-        
-        ═══════════════════════════════════════════════════════════
-        ## 🔗 الخطوة ٢: استخراج مترابط (ترابط الأدلة)
-        ═══════════════════════════════════════════════════════════
-        
-        بعد ما تبني التسلسل، استخرج كل الشهادات والأدلة منه بالقواعد دي:
-        
-        ### قاعدة التوافق المتبادل:
-        - لو التسلسل بيقول إن لاعب "أ" ولاعب "ب" كانوا في نفس المكان في نفس الوقت:
-          * شهادة "أ" لازم تذكر إنه شاف "ب"
-          * شهادة "ب" لازم تذكر إنه شاف "أ"
-        - لو لاعب كان لوحده، شهادته تقول كده وأدلته تبقى حاجات سمعها أو لاحظها وهو لوحده
-        
-        ### قاعدة التقاطع:
-        - لو لاعبين مختلفين شافوا نفس الحدث من أماكن مختلفة:
-          * كل واحد يوصف اللي شافه من زاويته هو بس
-          * مثال: لاعب في الصالة سمع صوت حاجة اتكسرت + لاعب في الممر شاف حد بيجري — دول بيوصفوا نفس اللحظة بس من مكانين مختلفين
-        
-        ### قاعدة عدم الاختراع (إلزامية — بدون استثناء):
-        - كل دليل (privateClues) وكل شهادة (mustSayTestimony) لازم يكون مبني على حدث موجود فعلاً في master_timeline
-        - لو دليل أو شهادة بيذكر حقيقة مش موجودة في أي حدث من التسلسل → امسحه فوراً وابدله بحاجة من التسلسل
-        - متديش أي لاعب دليل عن حاجة مكانش يقدر يشوفها أو يسمعها من مكانه في التسلسل
-        - مثال: لو لاعب كان في البلكونة، ميقدرش يدعي إنه سمع همس في القبو — إلا لو التسلسل بيقول إنه نزل هناك
-        - ممنوع تخترع تفاصيل جديدة (أشياء، أصوات، أحداث، مواقف) مش موجودة في master_timeline
-        - لو محتاج دليل إضافي، ارجع للتسلسل وشوف إيه اللي ممكن اللاعب يكون لاحظه من مكانه — متأَلفش من دماغك
-        
-        ### اختبار التحقق لكل دليل:
-        - اسأل نفسك: "الدليل ده مبني على أنهي حدث في master_timeline؟"
-        - لو مش عارف تحدد الحدث → الدليل مش صالح → غيره
-        
-        ═══════════════════════════════════════════════════════════
-        ## 🚫 الخطوة ٣: ممنوع الأدلة المباشرة (No Smoking Guns)
-        ═══════════════════════════════════════════════════════════
-        
-        ### ممنوع تماماً:
-        - محدش يشوف القتل نفسه أو العنف المباشر اللي أدى للقتل
-        - محدش يشوف المجرم وهو بيعمل الجريمة
-        - محدش يلاقي سلاح الجريمة في إيد المجرم
-        - محدش يسمع اعتراف صريح
-        - مفيش دليل واحد يكفي لوحده يكشف المجرم
-        
-        ### الأدلة المسموح بيها (ظرفية بس):
-        - سمع خناقة أو صوت عالي من ورا حيطة أو باب
-        - شاف حد بيجري أو بيمشي بسرعة وشكله متوتر
-        - لاحظ إن حاجة مش في مكانها (كرسي مقلوب، باب مفتوح، حاجة ناقصة)
-        - شاف حد دخل مكان معين قبل ما النور يقطع أو قبل ما الجريمة تتاكتشف
-        - لاحظ إن حد كان لابس حاجة مختلفة أو شكله متغير
-        - سمع خطوات أو صوت باب بيتقفل
-        - شم ريحة غريبة أو لاحظ حاجة مش طبيعية
-        
-        ### مثال على أدلة ظرفية كويسة:
-        ✅ "سمعت صوتين بيتخانقوا من ورا الباب بس مقدرتش أعرف مين"
-        ✅ "شفت حد طالع من الممر بسرعة بس النور كان ضعيف ومعرفتش مين"
-        ✅ "لاحظت إن الكرسي في الأوضة كان مقلوب لما دخلت"
-        ✅ "لقيت منديل عليه بقعة غريبة جنب الباب"
-        
-        ### أمثلة على أدلة ممنوعة (Smoking Guns):
-        ❌ "شفت أحمد بيخنق الضحية"
-        ❌ "لقيت السكينة في شنطة سارة وعليها دم"
-        ❌ "سمعت أحمد بيقول 'خلاص الموضوع خلص'"
-        ❌ "شفت أحمد طالع من أوضة الضحية وإيده فيها دم"
-        
-        ═══════════════════════════════════════════════════════════
-        ## 👁️ الخطوة ٤: قاعدة الرؤية الشخصية (First-Person Clue Rule) — إلزامية!
-        ═══════════════════════════════════════════════════════════
-        
-        ### القاعدة الذهبية:
-        كل دليل لازم يتكتب من وجهة نظر الشخص اللي بيستلمه — يعني "أنا شفت..."، "أنا سمعت..."، "أنا لاحظت..."
-        
-        ### ممنوع تماماً:
-        - متديش لاعب دليل بيتكلم عنه هو نفسه من بره
-        - متديش لاعب دليل بيقول "حد شافك" أو "إنت اتشفت" أو "لوحظ عليك"
-        
-        ### أمثلة:
-        لو في التسلسل: "سارة شافت أحمد بيدخل المطبخ"
-        ✅ صح — الدليل يروح لسارة: "شفت أحمد داخل المطبخ قبل ما النور يقطع"
-        ❌ غلط — الدليل يروح لأحمد: "سارة شافتك داخل المطبخ"
-        ❌ غلط — الدليل يروح لأحمد: "اتشاف أحمد وهو داخل المطبخ"
-        
-        لو في التسلسل: "كريم سمع خطوات من ناحية أوضة سارة"
-        ✅ صح — الدليل يروح لكريم: "سمعت خطوات جاية من ناحية أوضة سارة"
-        ❌ غلط — الدليل يروح لسارة: "كريم سمع خطواتك"
-        
-        ### اختبار بسيط قبل ما تبعت أي دليل:
-        ١. الدليل بيذكر اسم اللاعب اللي هياخده؟ → لو أيوه، انقله للاعب تاني
-        ٢. الدليل بيقول "حد شافك" أو "إنت اتلاحظت"؟ → لو أيوه، اقلبه لوجهة نظر الشخص اللي شاف
-        ٣. الدليل بيتكلم عن اللاعب من بره؟ → لو أيوه، غيره لوجهة نظر أولى (أنا شفت، أنا سمعت)
-        
-        ═══════════════════════════════════════════════════════════
-        ## ⚠️ قواعد تصميم المشتبه فيهم
-        ═══════════════════════════════════════════════════════════
-        
-        كل المشتبه فيهم لازم يبقى عندهم أسباب مقنعة للاشتباه فيهم.
-        اللعبة عمرها ما تعمل مشتبه فيه باين إنه بريء من الأول.
-        
-        كل مشتبه فيه لازم يبقى عنده حاجة واحدة على الأقل من دول:
-        - خناقة أو مشكلة جديدة مع الضحية
-        - خلاف مالي أو دين
-        - منافسة في الشغل
-        - غيرة أو توتر شخصي
-        - اتشاف قريب من مكان الجريمة (حسب التسلسل)
-        - عنده مصلحة من موت الضحية
-        - يقدر يوصل لمكان الجريمة (حسب التسلسل)
-        
-        ### توازن الشبهات:
-        - على الأقل ٣ مشتبه فيهم لازم يبقى عندهم دوافع مقنعة
-        - المجرم الحقيقي ميبقاش الشخصية المشبوهة الوحيدة
-        - المشتبه فيهم الأبرياء لازم يبقى عندهم كمان صراعات أو دوافع تخليهم يبانوا مذنبين
-        - الهدف: حالة حقيقية من الشك والتوتر
-        
-        ### ابعد عن الأدوار الواضحة:
-        - متعملش شخصيتين واضح إنهم مش مرتبطين بالضحية
-        - متخليش شخصية واحدة بس تبان مشبوهة
-        - كل المشتبه فيهم لازم يحسوا إنهم مرشحين معقولين للجريمة
-        
-        ═══════════════════════════════════════════════════════════
-        ## 🧩 تصميم الأدلة والصعوبة التدريجية
-        ═══════════════════════════════════════════════════════════
-        
-        - الأدلة لازم تبقى مقسمة ومش مباشرة — كلها ظرفية
-        - وزع أجزاء اللغز على كذا لاعب — لازم يتعاونوا عشان يجمعوا الصورة
-        - مفيش لاعب لوحده يقدر يحل اللغز
-        
-        ### ترتيب الصعوبة:
-        - الدليل الأول: غامض أوي، ممكن ينطبق على كذا حد (مثال: "سمعت صوت خطوات تقيلة")
-        - الدليل التاني: أكتر تحديداً بس لسه مش حاسم (مثال: "لاحظت إن باب المطبخ كان مفتوح")
-        - الدليل التالت: بيضيّق الشبهة بس محتاج ربط بأدلة تانية (مثال: "شفت منديل مرمي في الممر عليه ريحة عطر مميزة")
-        - الدليل الرابع: الأوضح بس لسه محتاج تجميع مع أدلة قبله (مثال: "لقيت خاتم الضحية تحت كرسي في المطبخ")
-        
-        ### مثال على تقسيم كويس:
-        لاعب ١: "سمعت صوت خطوات تقيلة قبل ما النور يقطع"
-        لاعب ٢: "لاحظت إن جزمة حد كانت متوسخة بالطين"
-        لاعب ٣: "شفت بقعة طين على سجادة الممر اللي بيوصل للأوضة"
-        → لما يجمعوا الأدلة دي مع بعض، هيقدروا يحددوا مين اللي كان ماشي في الطين
-        
-        ═══════════════════════════════════════════════════════════
-        ## 📋 تنسيق الرد (JSON بس — بدون أي كلام تاني):
-        ═══════════════════════════════════════════════════════════
-        
-        {
-            "master_timeline": [
-                {
-                    "event": "وصف الحدث — بالعامية المصرية",
-                    "player_positions": {
-                        "اسم_لاعب_١": "فين كان وإيه اللي كان بيعمله ومين كان معاه وإيه اللي ممكن يكون شافه/سمعه",
-                        "اسم_لاعب_٢": "فين كان وإيه اللي كان بيعمله ومين كان معاه وإيه اللي ممكن يكون شافه/سمعه"
-                    }
-                }
-            ],
-            "crimeBriefing": "القصة المعروفة للكل — بالعامية المصرية — فقرة أو اتنين — متقولش مين المجرم",
-            "timeline": ["حدث ١ مرجعي", "حدث ٢", "حدث ٣", "حدث ٤"],
-            "groundTruth": "الحقيقة الكاملة — بالعامية المصرية",
-            "setting": "وصف مختصر للمكان",
-            "packages": {
-                "اسم_اللاعب": {
-                    "role": "criminal أو innocent",
-                    "characterDescription": "وصف الشخصية + علاقته بالضحية + سبب الاشتباه — بالعامية المصرية",
-                    "suspicionReason": "السبب المحدد للاشتباه — بالعامية المصرية",
-                    "mustSayTestimony": "٣-٤ جمل مستخرجة من التسلسل: فين كان + مين شاف + إيه لاحظ — بالعامية المصرية",
-                    "privateClues": ["دليل ١ ظرفي من التسلسل", "دليل ٢", "دليل ٣", "دليل ٤"],
-                    "coverStory": "للمجرم بس أو null",
-                    "physicalState": "للمجرم بس أو null",
-                    "tacticalNote": "للمجرم بس أو null",
-                    "location": "للأبرياء بس أو null",
-                    "blindSpot": "للأبرياء بس أو null",
-                    "knowledgeAboutOthers": "للمجرم بس أو null"
-                }
-            }
-        }
-        
-        ═══════════════════════════════════════════════════════════
-        ## ✅ شيكليست نهائية — اتأكد من كل حاجة قبل ما تبعت:
-        ═══════════════════════════════════════════════════════════
-        
-        ١. master_timeline موجود وفيه ٦-١٠ أحداث وكل حدث فيه مكان كل لاعب؟
-        ٢. كل شهادة ودليل مستخرج فعلاً من التسلسل — ومفيش حقيقة جديدة مش موجودة في التسلسل؟
-        ٣. لو لاعبين كانوا مع بعض في التسلسل، شهاداتهم بتأكد ده؟
-        ٤. مفيش دليل مباشر (smoking gun) — كل الأدلة ظرفية؟
-        ٥. مفيش لاعب عنده دليل بيتكلم عنه هو من بره (قاعدة الرؤية الشخصية)؟
-        ٦. كل الأدلة مكتوبة بضمير المتكلم (أنا شفت، أنا سمعت)؟
-        ٧. مفيش دليل واحد كافي لوحده يكشف المجرم؟
-        ٨. على الأقل ٣ شخصيات عندهم دوافع مقنعة؟
-        ٩. كل الكلام بالعامية المصرية؟
-        ١٠. الرد JSON بس من غير أي كلام زيادة؟
+
+        ### ١. كل شخص يبان مشبوه:
+        - كل بريء لازم عنده دافع حقيقي وقوي يخلي الناس يشكوا فيه
+        - بس في نفس الوقت في دليل بيبرئه لو الناس فكروا صح
+        - المجرم يبان محبوب وهادي — دوافعه الحقيقية مدفونة تحت السطح
+
+        ### ٢. سلسلة الاستنتاج — ديناميكية حسب عدد اللاعبين:
+        - عدد الجولات = عدد الأبرياء + ١ (الأخيرة دايماً للمجرم)
+        - الجولة الأولى دايماً: كل لاعب عنده دليل بيشاور على شخص مختلف — الكل مشكوك فيه
+        - الجولات الوسطى (لو موجودة): أدلة البراءة بتبرئ الأبرياء واحد واحد
+        - الجولة الأخيرة دايماً: الـ alibi بتاع المجرم بينهار والأدلة عليه تتجمع
+        - مثال ٣ لاعبين (٢ بريء): جولة ١ توزيع الشبهة → جولة ٢ البريء يتبرأ → جولة ٣ المجرم
+        - مثال ٦ لاعبين (٥ بريء): جولة ١ توزيع → جولات ٢-٥ برايا واحد واحد → جولة ٦ المجرم
+
+        ### ٣. الأدلة المادية الصغيرة:
+        - كل دليل لازم يكون مستخرج من حدث حصل فعلاً في القصة
+        - ممنوع أي دليل يكون مش موجود أصله في السرد
+        - أمثلة: وقت محدد، مكان محدد، جملة اتقالت، حاجة اتشافت
+
+        ### ٤. الأسرار الشخصية:
+        - كل بريء عنده سر شخصي مش علاقة له بالجريمة بيخليه يبان أكتر مشبوهية
+        - أمثلة: بيسرق فلوس صغيرة، علاقة سرية، بيغطي دين
+
+        ### ٥. لغز الـ Alibi:
+        - المجرم عنده alibi يبدو قوي — بس فيه ثغرة واحدة بتظهر بس بمقارنة شهادتين
         """;
-    
-    /**
-     * Generate a complete scenario for the game
-     */
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Public API
+    // ─────────────────────────────────────────────────────────────────────────
+
     public void generateScenario(GameRoom room, List<String> playerNames, Consumer<Boolean> callback) {
-        int criminalCount = room.getCriminalCount();
-        String criminalInstruction = criminalCount > 1 
-            ? String.format("- اختار %d مجرمين عشوائي من اللعيبة (المجرمين بيشتغلوا مع بعض)", criminalCount)
-            : "- اختار مجرم واحد بس عشوائي";
-        
-        String userPrompt = String.format("""
-            اعمل سيناريو جريمة قتل للعيبة دول: %s
-            
-            المكان/الموضوع: %s
-            عدد المجرمين: %d
-            اللغة: العامية المصرية (مهم جداً — كل الكلام لازم يبقى بالعامية المصرية)
-            
-            ═══════════════════════════════════
-            🧠 خطوة ١ — ابني التسلسل الأول:
-            ═══════════════════════════════════
-            ابدأ بإنك تبني master_timeline كامل (٦-١٠ أحداث).
-            كل حدث لازم يحدد فين كل لاعب كان، ومين كان معاه، وإيه اللي ممكن يكون شافه أو سمعه.
-            التسلسل ده هو الأساس — كل الشهادات والأدلة لازم تتسحب منه.
-            
-            ═══════════════════════════════════
-            🔗 خطوة ٢ — استخرج من التسلسل:
-            ═══════════════════════════════════
-            - لو لاعبين كانوا مع بعض، شهاداتهم لازم تأكد ده
-            - كل دليل لازم يبقى حاجة اللاعب فعلاً يقدر يشوفها/يسمعها من مكانه في التسلسل
-            - متخترعش أدلة من الفراغ — كل حاجة من التسلسل
-            - ⛔ ممنوع أي دليل أو شهادة تذكر حقيقة مش موجودة في master_timeline
-            - لو دليل بيتكلم عن شيء/صوت/حدث/مكان مش موجود في التسلسل → غيره فوراً
-            
-            ═══════════════════════════════════
-            🚫 خطوة ٣ — ممنوع الأدلة المباشرة:
-            ═══════════════════════════════════
-            - محدش يشوف القتل نفسه
-            - محدش يلاقي سلاح الجريمة في إيد المجرم
-            - مفيش دليل واحد كافي لكشف المجرم
-            - كل الأدلة لازم تبقى ظرفية (سمع صوت، شاف حد بيجري، لاحظ حاجة غريبة)
-            - اللعيبة لازم يجمعوا كذا دليل مع بعض عشان يعرفوا الحقيقة
-            
-            ═══════════════════════════════════
-            👁️ خطوة ٤ — قاعدة الرؤية الشخصية:
-            ═══════════════════════════════════
-            - كل دليل يتكتب بضمير المتكلم: "شفت..."، "سمعت..."، "لاحظت..."
-            - متديش لاعب دليل بيتكلم عنه من بره أبداً
-            - لو سارة شافت أحمد، الدليل يروح لسارة مش لأحمد
-            
-            ═══════════════════════════════════
-            ⚠️ قواعد المشتبه فيهم:
-            ═══════════════════════════════════
-            - كل لاعب لازم يبقى عنده سبب مقنع للاشتباه فيه
-            - على الأقل ٣ شخصيات عندهم دوافع قوية
-            - متخليش المجرم الحقيقي هو الشخصية الوحيدة المشبوهة
-            - وزع الشبهات بالتساوي
-            
-            اتأكد كمان من:
-            %s
-            - كل شهادة ٣-٤ جمل مستخرجة من التسلسل — بالعامية المصرية
-            - كل لاعب ياخد ٣-٤ أدلة ظرفية من التسلسل — بالعامية المصرية
-            - شهادة المجرم فيها ثغرة واحدة مخبية (بس مش واضحة أوي)
-            - اعمل master_timeline من ٦-١٠ أحداث مع مكان كل لاعب
-            - اعمل timeline عام من ٤-٦ أحداث مرجعية
-            - ابعت crimeBriefing يوصف قصة الجريمة — بالعامية المصرية
-            
-            ═══════════════════════════════════
-            ✅ تأكيد أخير قبل ما تبعت:
-            ═══════════════════════════════════
-            ١. كل دليل وشهادة مطلعين من master_timeline — ومفيش حقيقة جديدة مش موجودة في التسلسل؟
-            ٢. لو لاعبين كانوا مع بعض في التسلسل، شهاداتهم بتأكد ده؟
-            ٣. مفيش دليل مباشر (smoking gun)؟
-            ٤. مفيش لاعب عنده دليل بيتكلم عنه من بره؟
-            ٥. كل الأدلة بضمير المتكلم (أنا شفت، أنا سمعت)؟
-            ٦. كل الكلام بالعامية المصرية?
-            ٧. لو حذفت master_timeline، هل كل دليل لسه ليه مرجع في التسلسل الأصلي؟ لو لأ → غيره
-            """,
-            String.join("، ", playerNames),
-            room.getSetting() != null ? room.getSetting() : "فندق فاخر في القاهرة",
-            criminalCount,
-            criminalInstruction
-        );
-        
         try {
-            String response = callGeminiApi(userPrompt);
-            parseAndAssignPackages(room, response);
-            
-            // Validate that every player got a package — if any is missing, fail back to LOBBY
+            // ── Call 1: Full narrative story ────────────────────────────
+            log.info("[Step 1/3] Generating full narrative story...");
+            JsonNode foundation = callAndParse(buildFoundationPrompt(room, playerNames));
+            log.info("[Step 1/3] Foundation generated.");
+            log.info("===== FOUNDATION JSON =====\n{}", foundation.toPrettyString());
+
+            // ── Call 2: Extract clues FROM the story ────────────────────
+            log.info("[Step 2/3] Extracting clues from story...");
+            JsonNode clues = callAndParse(buildCluesPrompt(foundation, playerNames)); 
+            log.info("[Step 2/3] Clues generated.");
+            log.info("===== CLUES JSON =====\n{}", clues.toPrettyString());
+
+            // ── Call 3: Testimonies built around hooks ───────────────────
+            log.info("[Step 3/3] Generating testimonies...");
+            JsonNode testimonies = callAndParse(buildTestimoniesPrompt(foundation, clues));
+            log.info("[Step 3/3] Testimonies generated.");
+            log.info("===== TESTIMONIES JSON =====\n{}", testimonies.toPrettyString());
+
+            // ── Assemble everything into PlayerPackages ──────────────────
+            assemblePackages(room, foundation, clues, testimonies);
+
+            // ── Validate hooks (Soft Validation) ─────────────────────────
+            List<String> violations = validateHooks(room);
+            if (!violations.isEmpty()) {
+                violations.forEach(v -> log.warn("⚠️ Hook Warning (game continues): {}", v));
+            }
+
+            // ── Check no player is missing a package ─────────────────────
             List<String> missing = room.getAllPlayers().stream()
-                    .filter(p -> p.getPlayerPackage() == null)
-                    .map(Player::getName)
-                    .toList();
-            
+                .filter(p -> p.getPlayerPackage() == null)
+                .map(Player::getName).toList();
             if (!missing.isEmpty()) {
-                log.error("Scenario generation incomplete — missing packages for players: {}. " +
-                          "This usually means the AI response was truncated (too many players) " +
-                          "or the AI changed a player name.", missing);
+                log.error("Missing packages for: {}", missing);
                 callback.accept(false);
                 return;
             }
-            
+
+            log.info("Scenario generation complete for room {}", room.getRoomCode());
             callback.accept(true);
+
         } catch (Exception e) {
             log.error("Error generating scenario", e);
             callback.accept(false);
         }
     }
-    
-    private String callGeminiApi(String userPrompt) {
-        Map<String, Object> requestBody = Map.of(
-            "contents", List.of(
-                Map.of("role", "user", "parts", List.of(
-                    Map.of("text", SYSTEM_PROMPT + "\n\n" + userPrompt)
-                ))
-            ),
-            "generationConfig", Map.of(
-                "temperature", 0.9,
-                "topK", 40,
-                "topP", 0.95,
-                "maxOutputTokens", 65536,
-                "responseMimeType", "application/json"
-            )
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Prompt Builders
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private String buildFoundationPrompt(GameRoom room, List<String> playerNames) {
+        String criminalNote = room.getCriminalCount() > 1
+            ? String.format("عدد المجرمين: %d (بيشتغلوا مع بعض)", room.getCriminalCount())
+            : "عدد المجرمين: ١";
+
+        return String.format("""
+            اكتب قصة جريمة قتل كاملة بالعامية المصرية بأسلوب أجاثا كريستي للبيانات دي:
+            - اللعيبة: %s
+            - المكان: %s
+            - %s
+
+            ## القواعد الإلزامية للقصة:
+
+            ### أولاً — القصة السردية (Scenario Refinement & Timeline):
+            - اكتب قصة سردية كاملة بالتسلسل الزمني، زي رواية قصيرة
+            - سد أي ثغرات منطقية قد تكون موجودة في القصة عشان تكون محكمة تماماً
+            - كل حدث فيه: الوقت بالدقيقة، المكان، مين كان فين، إيه اللي حصل بالظبط
+            - القصة لازم تشرح الدوافع الكاملة لكل شخص
+            - كل لاعب بريء لازم يكون عنده:
+              * دافع حقيقي وقوي يخليه يبان مشبوه (حاجة حصلت فعلاً في القصة)
+              * alibi صلب يبرئه لو الناس ربطوا الأدلة صح
+              * سر شخصي مش علاقة له بالجريمة بس بيضيف شبهة
+
+            ### تانياً — بيانات اللاعبين (players):
+            لكل لاعب:
+            - role: "criminal" أو "innocent"
+            - characterDescription: وصف الشخصية وعلاقتها بالضحية
+            - suspicionReason: الدافع القوي اللي بيخليه يبان مشبوه أو السر الشخصي
+            - personalSecret: السر الشخصي الزيادة (للأبرياء)
+            - alibi: مين وأمتى كان معاه (للأبرياء) — لازم يكون في القصة
+            - للمجرم: coverStory, alibiCrack, tacticalNote, knowledgeAboutOthers
+            - للأبرياء: location (وقت الجريمة), blindSpot (حاجة مش شافها)
+
+            ### تالتاً — ملخص سري للـ Game Master (master_timeline):
+            - يوضح التسلسل الزمني الدقيق للجريمة خطوة بخطوة بالدقائق
+
+            الرد JSON بس، بالعامية المصرية، بدون أي نص زيادة.
+            الـ JSON لازم يحتوي على: fullNarrative, setting, crimeBriefing, groundTruth, master_timeline, players
+
+            ⚠️ مهم جداً: الـ players لازم يكون JSON object — كل مفتاح هو اسم اللاعب بالظبط:
+            مثال:
+            "players": {
+                "%s": {"role": "...", "characterDescription": "...", ...}
+            }
+            ممنوع تستخدم array أو أسماء تانية زي "اللاعب الأول" — لازم اسم اللاعب الحقيقي.
+            """,
+            String.join("، ", playerNames),
+            playerNames.get(0),
+            room.getSetting() != null ? room.getSetting() : "فندق فاخر في القاهرة",
+            criminalNote
         );
-        
-        String response = geminiWebClient.post()
-                .uri("/models/{model}:generateContent?key={key}", model, apiKey)
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-        
-        return extractTextFromResponse(response);
     }
-    
-    private String extractTextFromResponse(String response) {
-        try {
-            JsonNode root = objectMapper.readTree(response);
-            JsonNode candidates = root.path("candidates");
-            if (candidates.isArray() && candidates.size() > 0) {
-                JsonNode content = candidates.get(0).path("content");
-                JsonNode parts = content.path("parts");
-                if (parts.isArray() && parts.size() > 0) {
-                    return parts.get(0).path("text").asText();
-                }
-            }
-        } catch (Exception e) {
-            log.error("Error parsing Gemini response", e);
+
+   
+    private String buildCluesPrompt(JsonNode foundation, List<String> playerNames) { 
+        String playersStr = String.join("، ", playerNames);
+        
+        return String.format("""
+            بناءً على القصة دي:
+            %s
+
+            ## المطلوب: استخرج الأدلة المادية الملموسة (Tangible Evidence) من القصة.
+            ⚠️ ممنوع تخترع أي معلومة مش موجودة فعلاً في السرد.
+
+            ### القواعد الإلزامية للأدلة:
+            - كل تصنيف (type) إلزامي: CRIMINAL أو SUSPICION أو ALIBI أو RED_HERRING.
+            - ابتكر من 3 إلى 5 أدلة مادية ملموسة (مثلاً إيصال مطعم، طين على حذاء، رسالة نص محترقة، قطعة قماش، بصمة روچ).
+            - لا تجعل الأدلة تفضح القاتل بشكل مباشر وسهل.
+            - كل دليل مادي لازم يربط شخصية معينة بمسرح الجريمة أو ينفي عنها حجة غيابها (Alibi).
+            - النص جوا الدليل (clue) لازم يشرح الدليل اتمسك فين، وإيه الدلالة الخفية بتاعته.
+
+            ### قواعد التوزيع:
+            - كل بريء لازم عنده SUSPICION clue واحد على الأقل
+            - كل SUSPICION clue لازم يقابله ALIBI clue يبرئ صاحبه
+            - الـ ALIBI لازم يكون عند لاعب تاني (مش صاحب الـ SUSPICION)
+            - الأدلة CRIMINAL لازم ٣ على الأقل ومش بتظهر كلها من أول جولة
+
+            ### ⚠️ قاعدة التوزيع الإلزامية — تنوع الشبهة:
+            - الأدلة لازم تتوزع من أول جولة على لاعبين مختلفين — ممنوع الأدلة الأولى كلها تشاور على نفس الشخص
+            - كل لاعب يلاقي دليله لازم يشك في شخص مختلف عن اللاعب التاني
+            - كل SUSPICION clue لبريء لازم يقابله ALIBI clue مع لاعب تاني يبرئه
+
+            ### الحقول الإلزامية لكل دليل:
+            - holder: اسم اللاعب اللي هيلاقي الدليل ده (لازم يكون من اللعيبة: %s)
+            - type: CRIMINAL / SUSPICION / ALIBI / RED_HERRING
+            - clue: نص الدليل المادي بضمير المتكلم (مثال: "لقيت إيصال مطعم مجعد واقع جنب الباب مكتوب عليه كذا...")
+            - targets: اسم اللاعب اللي الدليل ده بيخصه أو بيكشف كذبته
+            - hook_player: 🚨🚨 تنبيه شديد اللهجة: اسم اللاعب اللي الشهادة بتاعته هتدعم أو تكذب الدليل ده.
+              ⚠️ إلزامي وحتمي: يجب أن يكون الاسم حصرياً واحداً من هؤلاء اللاعبين فقط: [%s].
+              ممنوع نهائياً وباتاً استخدام أي شخصيات ثانوية، خدم، عمال، أو أي اسم غير موجود في القائمة السابقة.
+            - hook_sentence: الجملة اللي هتكون موجودة في شهادة الـ hook_player (⚠️ إلزامي: لازم تتكتب بصيغة المتكلم "أنا" زي: "أنا رحت كذا" مش "هو راح").
+            - chain_connects_to: اسم الدليل التاني المرتبط بيه
+            - narrative_source: الجملة من القصة اللي استخرجت منها الدليل ده
+
+            الرد JSON بس: {"clues": [...]}
+            """,
+            foundation.path("fullNarrative").asText(foundation.toString()),
+            playersStr, playersStr // نمرر الأسماء مرتين
+        );
+    }
+
+    private String buildTestimoniesPrompt(JsonNode foundation, JsonNode clues) {
+        return String.format("""
+            بناءً على القصة والأدلة المادية دول:
+
+            القصة الكاملة:
+            %s
+
+            الأدلة والهوكات المطلوبة:
+            %s
+
+            ## المطلوب: اكتب شهادات المشتبه بهم (Witness Testimonies) بالعامية المصرية.
+
+            ### قواعد إلزامية لكل شهادة:
+            - اكتب شهادة رسمية قصيرة على لسان كل لاعب (بصيغة المتكلم) 3-4 جمل بس.
+            - كل شهادة لازززززم تحتوي على:
+              أ) حجة غيابهم (Alibi) وقت الجريمة.
+              ب) علاقتهم بالضحية.
+              ج) تناقض بسيط أو "نصف كذبة" تتقاطع مع شهادة شخصية تانية أو دليل مادي، لتثير الشك.
+            - كل شهادة لازم تحتوي بالنص (Copy & Paste) على الـ hook_sentences المطلوبة من اللاعب ده.
+            - الشهادة تبان طبيعية ومقنعة.
+            - المجرم شهادته تحتوي على cover story محكم مع ثغرة مخفية واحدة.
+
+            ⚠️ مهم: استخدم أسماء اللعيبة الحقيقية بالظبط زي ما هي في القصة.
+
+            الرد JSON بس: {"testimonies": {"اسم اللاعب": "الشهادة..."}}
+            """,
+            foundation.path("fullNarrative").asText(foundation.toString()),
+            clues.toString()
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Assembly
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void assemblePackages(GameRoom room, JsonNode foundation,
+                                   JsonNode clues, JsonNode testimonies) {
+        room.setGroundTruth(foundation.path("groundTruth").asText());
+        room.setCrimeBriefing(foundation.path("crimeBriefing").asText());
+        if (foundation.has("setting"))
+            room.setSetting(foundation.path("setting").asText());
+        if (foundation.has("master_timeline")) {
+            room.setMasterTimeline(foundation.path("master_timeline").toString());
+            log.info("Master timeline stored — {} events", foundation.path("master_timeline").size());
         }
-        return "";
-    }
-    
-    private void parseAndAssignPackages(GameRoom room, String response) {
-        try {
-            // Extract JSON from response (may have markdown code blocks)
-            String json = extractJson(response);
-            JsonNode root = objectMapper.readTree(json);
-            
-            // Set ground truth and crime briefing
-            room.setGroundTruth(root.path("groundTruth").asText());
-            room.setCrimeBriefing(root.path("crimeBriefing").asText());
-            
-            // Store master timeline (hidden — never shown to players)
-            if (root.has("master_timeline")) {
-                room.setMasterTimeline(root.path("master_timeline").toString());
-                log.info("Master timeline stored for room {} ({} events)", 
-                        room.getRoomCode(), root.path("master_timeline").size());
-            }
-            
-            // Set setting if present
-            if (root.has("setting")) {
-                room.setSetting(root.path("setting").asText());
-            }
-            
-            // Parse packages
-            JsonNode packages = root.path("packages");
-            Iterator<Map.Entry<String, JsonNode>> fields = packages.fields();
-            
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> entry = fields.next();
-                String playerName = entry.getKey().trim();
-                JsonNode pkg = entry.getValue();
-                
-                // Find player by name — try exact match first, then normalized whitespace match
-                Optional<Player> playerOpt = room.getAllPlayers().stream()
-                        .filter(p -> p.getName().trim().equals(playerName))
-                        .findFirst();
-                
-                // Fallback: collapse internal whitespace and compare
-                if (playerOpt.isEmpty()) {
-                    String normalizedKey = playerName.replaceAll("\\s+", " ");
-                    playerOpt = room.getAllPlayers().stream()
-                            .filter(p -> p.getName().trim().replaceAll("\\s+", " ").equals(normalizedKey))
-                            .findFirst();
-                }
-                
-                if (playerOpt.isEmpty()) {
-                    log.warn("AI returned package for unknown player name '{}' — skipping. Known players: {}",
-                            playerName,
-                            room.getAllPlayers().stream().map(Player::getName).toList());
-                }
-                
-                if (playerOpt.isPresent()) {
-                    Player player = playerOpt.get();
-                    
-                    String roleStr = pkg.path("role").asText().toLowerCase();
-                    PlayerRole role = roleStr.contains("criminal") ? PlayerRole.CRIMINAL : PlayerRole.INNOCENT;
-                    player.setRole(role);
-                    
-                    List<String> privateClues = new ArrayList<>();
-                    JsonNode cluesNode = pkg.path("privateClues");
-                    if (cluesNode.isArray()) {
-                        for (JsonNode clue : cluesNode) {
-                            privateClues.add(clue.asText());
-                        }
-                    }
-                    
-                    PlayerPackage playerPackage = PlayerPackage.builder()
-                            .role(role)
-                            .characterDescription(pkg.path("characterDescription").asText(null))
-                            .suspicionReason(pkg.path("suspicionReason").asText(null))
-                            .mustSayTestimony(pkg.path("mustSayTestimony").asText())
-                            .privateClues(privateClues)
-                            .coverStory(pkg.path("coverStory").asText(null))
-                            .physicalState(pkg.path("physicalState").asText(null))
-                            .tacticalNote(pkg.path("tacticalNote").asText(null))
-                            .location(pkg.path("location").asText(null))
-                            .blindSpot(pkg.path("blindSpot").asText(null))
-                            .knowledgeAboutOthers(pkg.path("knowledgeAboutOthers").asText(null))
-                            .build();
-                    
-                    player.setPlayerPackage(playerPackage);
-                    log.info("Assigned package to player {} with role {}", playerName, role);
-                }
-            }
-            
-            // Warn about any players who didn't receive a package
-            room.getAllPlayers().forEach(p -> {
-                if (p.getPlayerPackage() == null) {
-                    log.warn("Player '{}' (id={}) did NOT receive a package — AI may not have included their name",
-                            p.getName(), p.getId());
-                }
+        if (foundation.has("fullNarrative")) {
+            room.setFullNarrative(foundation.path("fullNarrative").asText());
+            log.info("Full narrative stored");
+        }
+
+        // ── Handle both array and object formats for "players" ──
+        JsonNode playersNode = foundation.path("players");
+        log.info("Players node type: {} (size: {})", playersNode.getNodeType(), playersNode.size());
+
+        // Log clue holders & room players for debugging
+        JsonNode cluesArray = clues.path("clues");
+        log.info("Clues count: {}", cluesArray.size());
+        List<String> roomPlayerNames = room.getAllPlayers().stream().map(Player::getName).toList();
+        log.info("Room players: {}", roomPlayerNames);
+
+        if (playersNode.isObject()) {
+            // Preferred format: {"محمد": {...}, "أحمد": {...}}
+            playersNode.fields().forEachRemaining(entry -> {
+                String name = entry.getKey();
+                JsonNode info = entry.getValue();
+                processPlayer(room, name, info, clues, testimonies);
             });
-            
+        } else if (playersNode.isArray()) {
+            // Fallback: array — try "name" field first, else map by index to room players
+            int idx = 0;
+            for (JsonNode info : playersNode) {
+                String name = info.path("name").asText("").trim();
+                if (name.isEmpty() && idx < roomPlayerNames.size()) {
+                    // No name field — map by array position to room player order
+                    name = roomPlayerNames.get(idx);
+                    log.info("Array player [{}] has no 'name' — mapped to room player '{}'", idx, name);
+                }
+                if (!name.isEmpty()) {
+                    processPlayer(room, name, info, clues, testimonies);
+                } else {
+                    log.warn("Skipping player entry [{}] — no name and no room player at this index", idx);
+                }
+                idx++;
+            }
+        } else {
+            log.error("'players' field is neither an array nor an object! Type: {}", playersNode.getNodeType());
+        }
+
+        // Log final summary
+        room.getAllPlayers().forEach(p -> {
+            if (p.getPlayerPackage() == null) {
+                log.warn("Player '{}' received no package", p.getName());
+            } else {
+                int clueCount = p.getPlayerPackage().getPrivateClues() != null
+                    ? p.getPlayerPackage().getPrivateClues().size() : 0;
+                log.info("Player '{}' — role: {}, clues: {}", p.getName(), p.getRole(), clueCount);
+            }
+        });
+    }
+
+    private void processPlayer(GameRoom room, String name, JsonNode info,
+                                JsonNode clues, JsonNode testimonies) {
+        // Collect this player's clues from Call 2
+        List<PlayerClue> playerClues = new ArrayList<>();
+        clues.path("clues").forEach(c -> {
+            String holder = c.path("holder").asText("").trim();
+            // Fuzzy match: exact or contains
+            if (holder.equals(name.trim())
+                || holder.contains(name.trim())
+                || name.trim().contains(holder)) {
+                playerClues.add(PlayerClue.builder()
+                    .clue(c.path("clue").asText())
+                    .type(c.path("type").asText(null))
+                    .targets(c.path("targets").asText(null))
+                    .hookPlayer(c.path("hook_player").asText(null))
+                    .hookSentence(c.path("hook_sentence").asText(null))
+                    .chainConnectsTo(c.path("chain_connects_to").asText(null))
+                    .narrativeSource(c.path("narrative_source").asText(null))
+                    .build());
+            }
+        });
+        log.info("Clues for '{}': {}", name, playerClues.size());
+
+        // Testimony from Call 3 — handle both object and array
+        String testimony = "";
+        JsonNode testimonyNode = testimonies.path("testimonies");
+        if (testimonyNode.isObject()) {
+            testimony = testimonyNode.path(name).asText("");
+        } else if (testimonyNode.isArray()) {
+            for (JsonNode t : testimonyNode) {
+                if (t.path("name").asText("").trim().equals(name.trim())) {
+                    testimony = t.path("testimony").asText(t.path("text").asText(""));
+                    break;
+                }
+            }
+        }
+
+        final String finalTestimony = testimony;
+        findPlayer(room, name).ifPresentOrElse(
+            player -> assignPackage(player, info, playerClues, finalTestimony),
+            () -> log.warn("Unknown player '{}' — skipping. Known: {}",
+                name, room.getAllPlayers().stream().map(Player::getName).toList())
+        );
+    }
+
+    private void assignPackage(Player player, JsonNode info,
+                                List<PlayerClue> clues, String testimony) {
+        PlayerRole role = info.path("role").asText().toLowerCase().contains("criminal")
+            ? PlayerRole.CRIMINAL : PlayerRole.INNOCENT;
+        player.setRole(role);
+
+        player.setPlayerPackage(PlayerPackage.builder()
+            .role(role)
+            .characterDescription(info.path("characterDescription").asText(null))
+            .suspicionReason(info.path("suspicionReason").asText(null))
+            .personalSecret(info.path("personalSecret").asText(null))
+            .alibi(info.path("alibi").asText(null))
+            .mustSayTestimony(testimony)
+            .privateClues(clues)
+            .coverStory(info.path("coverStory").asText(null))
+            .tacticalNote(info.path("tacticalNote").asText(null))
+            .location(info.path("location").asText(null))
+            .blindSpot(info.path("blindSpot").asText(null))
+            .knowledgeAboutOthers(info.path("knowledgeAboutOthers").asText(null))
+            .alibiCrack(info.path("alibiCrack").asText(null))
+            .build());
+
+        log.info("Assigned {} package to '{}' (clues: {})", role, player.getName(), clues.size());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Hook Validation
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private List<String> validateHooks(GameRoom room) {
+        List<String> violations = new ArrayList<>();
+
+        room.getAllPlayers().forEach(player -> {
+            if (player.getPlayerPackage() == null) return;
+
+            player.getPlayerPackage().getPrivateClues().forEach(clue -> {
+                if (clue.getHookPlayer() == null || clue.getHookSentence() == null) return;
+
+                findPlayer(room, clue.getHookPlayer()).ifPresentOrElse(hookPlayer -> {
+                    if (hookPlayer.getPlayerPackage() == null) return;
+                    String testimony = hookPlayer.getPlayerPackage().getMustSayTestimony();
+
+                    if (!normalize(testimony).contains(normalize(clue.getHookSentence()))) {
+                        violations.add(String.format(
+                            "Hook broken | clue at '%s': [%s] | expected in '%s' testimony: [%s]",
+                            player.getName(), clue.getClue(),
+                            clue.getHookPlayer(), clue.getHookSentence()
+                        ));
+                    }
+                }, () -> violations.add(
+                    String.format("hook_player '%s' not found in game", clue.getHookPlayer())
+                ));
+            });
+        });
+
+        return violations;
+    }
+
+    private String normalize(String s) {
+        return s.replaceAll("[\\s\\p{Punct}،؟!.]", "").toLowerCase();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Gemini API
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private JsonNode callAndParse(String userPrompt) throws Exception {
+        return objectMapper.readTree(extractJson(callGeminiApi(userPrompt)));
+    }
+
+    private String callGeminiApi(String userPrompt) {
+        Map<String, Object> body = Map.of(
+            "system_instruction", Map.of("parts", List.of(Map.of("text", SYSTEM_PROMPT))),
+            "contents",           List.of(Map.of("role", "user",
+                                                 "parts", List.of(Map.of("text", userPrompt)))),
+            "generationConfig",   GENERATION_CONFIG
+        );
+
+        String raw = geminiWebClient.post()
+            .uri("/models/{m}:generateContent?key={k}", model, apiKey)
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(String.class)
+            .block();
+
+        return extractText(raw);
+    }
+
+    private String extractText(String response) {
+        try {
+            return objectMapper.readTree(response)
+                .path("candidates").get(0)
+                .path("content").path("parts").get(0)
+                .path("text").asText();
         } catch (Exception e) {
-            log.error("Error parsing scenario response: {}", response, e);
-            throw new RuntimeException("Failed to parse scenario", e);
+            log.error("Failed to extract text from Gemini response", e);
+            return "";
         }
     }
-    
+
     private String extractJson(String text) {
-        // Try to extract JSON from markdown code blocks (with closing ```)
-        Pattern pattern = Pattern.compile("```(?:json)?\\s*([\\s\\S]*?)```");
-        Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group(1).trim();
-        }
-        
-        // Handle truncated code blocks (opening ``` but no closing ```)
-        Pattern openOnly = Pattern.compile("```(?:json)?\\s*([\\s\\S]*)");
-        Matcher openMatcher = openOnly.matcher(text);
-        if (openMatcher.find()) {
-            return openMatcher.group(1).trim();
-        }
-        
-        // Try to find first { to last } as JSON
-        int firstBrace = text.indexOf('{');
-        int lastBrace = text.lastIndexOf('}');
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            return text.substring(firstBrace, lastBrace + 1);
-        }
-        
-        // If no code blocks, assume the whole thing is JSON
-        return text.trim();
+        Matcher m = Pattern.compile("```(?:json)?\\s*([\\s\\S]*?)```").matcher(text);
+        if (m.find()) return m.group(1).trim();
+
+        Matcher open = Pattern.compile("```(?:json)?\\s*([\\s\\S]*)").matcher(text);
+        if (open.find()) return open.group(1).trim();
+
+        int start = text.indexOf('{'), end = text.lastIndexOf('}');
+        return (start >= 0 && end > start) ? text.substring(start, end + 1) : text.trim();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private Optional<Player> findPlayer(GameRoom room, String name) {
+        String key = name.trim().replaceAll("\\s+", " ");
+        // Exact match first
+        Optional<Player> exact = room.getAllPlayers().stream()
+            .filter(p -> p.getName().trim().replaceAll("\\s+", " ").equals(key))
+            .findFirst();
+        if (exact.isPresent()) return exact;
+
+        // Fuzzy: contains-based fallback
+        return room.getAllPlayers().stream()
+            .filter(p -> {
+                String pName = p.getName().trim().replaceAll("\\s+", " ");
+                return pName.contains(key) || key.contains(pName);
+            })
+            .findFirst();
     }
 }

@@ -22,7 +22,6 @@ export interface JoinRoomResponse {
 export async function createRoom(
   hostName: string,
   setting?: string,
-  criminalCount: number = 1,
 ): Promise<ApiResponse<CreateRoomResponse>> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/rooms`, {
@@ -34,7 +33,6 @@ export async function createRoom(
         hostName,
         setting,
         language: "Arabic",
-        criminalCount,
       }),
     });
 

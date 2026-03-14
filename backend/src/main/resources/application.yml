@@ -7,14 +7,14 @@ spring:
 
 # Gemini AI Configuration
 gemini:
-  api-key: 
+  api-key: ${GEMINI_API_KEY:YOUR_GEMINI_API_KEY_HERE}
   model: gemini-2.5-flash
   base-url: https://generativelanguage.googleapis.com/v1beta
 
 # Game Configuration
 game:
   max-players: 8
-  min-players: 2
+  min-players: 3
   room-code-length: 6
 
 # CORS

@@ -37,7 +37,7 @@ public class RoomService {
     @Value("${game.min-players}")
     private int minPlayers;
     
-    public GameRoom createRoom(String hostName, String setting, GameLanguage language, int criminalCount) {
+    public GameRoom createRoom(String hostName, String setting, GameLanguage language) {
         String roomCode = generateRoomCode();
         String hostId = generatePlayerId();
         
@@ -54,7 +54,6 @@ public class RoomService {
                 .phase(GamePhase.LOBBY)
                 .language(language)
                 .setting(setting)
-                .criminalCount(Math.max(1, criminalCount))
                 .build();
         
         room.addPlayer(host);

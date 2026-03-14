@@ -45,6 +45,9 @@ public class GameRoom {
     // Master timeline (hidden chain-of-thought — never shown to players, used for validation)
     private String masterTimeline;
     
+    // Full narrative story
+    private String fullNarrative;
+    
     // Game result
     private String winningSide; // "innocents" or "criminal"
     

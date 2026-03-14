@@ -36,9 +36,28 @@ public class GameService {
     private final ScenarioGeneratorService scenarioGenerator;
     private final WebSocketService webSocketService;
     
+    // ==================== ROOM MANAGEMENT ====================
+    
+    public void closeRoom(String roomCode, String requestingPlayerId) {
+        GameRoom room = roomService.getRoom(roomCode);
+        validateHost(room, requestingPlayerId);
+        
+        log.info("Host {} is closing room {}", requestingPlayerId, roomCode);
+        
+        // Broadcast to all players that the room is closed
+        WebSocketMessage closeMessage = WebSocketMessage.builder()
+                .type("ROOM_CLOSED")
+                .message("The host has closed the room.")
+                .build();
+        webSocketService.broadcastToRoom(roomCode, closeMessage);
+        
+        // Remove room entirely from memory
+        roomService.removeRoom(roomCode);
+    }
+    
     // ==================== GAME START ====================
     
-    public void startGame(String roomCode, String requestingPlayerId) {
+    public void startGame(String roomCode, String requestingPlayerId, int criminalCount) {
         GameRoom room = roomService.getRoom(roomCode);
         
         if (!room.getHostPlayerId().equals(requestingPlayerId)) {
@@ -51,9 +70,20 @@ public class GameService {
             throw new GameException("Game has already started");
         }
         
+        // Validate criminal count: must be >= 1 and <= half the total players
+        int maxCriminals = room.getAllPlayers().size() / 2;
+        if (criminalCount < 1) {
+            throw new GameException("عدد المجرمين لازم يكون ١ على الأقل");
+        }
+        if (criminalCount > maxCriminals) {
+            throw new GameException("عدد المجرمين لازم يكون أقل من أو يساوي " + maxCriminals);
+        }
+        
+        room.setCriminalCount(criminalCount);
         room.setPhase(GamePhase.GENERATING_SCENARIO);
         broadcastGameState(room, "جاري إنشاء السيناريو...");
         
+        // All players participate in the game
         List<String> playerNames = room.getAllPlayers().stream()
                 .map(Player::getName)
                 .toList();
@@ -107,7 +137,7 @@ public class GameService {
             throw new GameException("Not in suspects phase");
         }
         
-        // Send private packages to each player (role, testimony, fellow criminals)
+        // Send private packages to all players
         for (Player player : room.getAllPlayers()) {
             sendPlayerPackage(room.getRoomCode(), player, room);
         }
@@ -145,13 +175,14 @@ public class GameService {
         room.startNewRound(); // increments currentRound, resets votes, sets roundClueRevealed=false
         room.setRoundClueRevealed(true);
         
-        // Reveal one more clue per active player
-        for (Player player : room.getActivePlayers()) {
+        // Reveal one more clue per player — including eliminated "ghosts"
+        // so no pre-generated clues are lost from the deduction chain
+        for (Player player : room.getAllPlayers()) {
             player.revealNextClue();
         }
         
-        // Send updated packages to all active players
-        for (Player player : room.getActivePlayers()) {
+        // Send updated packages to ALL players (ghosts still need their clues)
+        for (Player player : room.getAllPlayers()) {
             sendPlayerPackage(room.getRoomCode(), player, room);
         }
         
@@ -358,7 +389,10 @@ public class GameService {
      * For criminals: replace clues with misleading messages.
      */
     private void sendPlayerPackage(String roomCode, Player player, GameRoom room) {
-        if (player.getPlayerPackage() == null) return;
+        if (player.getPlayerPackage() == null) {
+            log.warn("sendPlayerPackage: Player '{}' has NULL package, skipping", player.getName());
+            return;
+        }
         
         var pkg = player.getPlayerPackage();
         int totalClues = pkg.getPrivateClues() != null ? pkg.getPrivateClues().size() : 0;
@@ -380,9 +414,14 @@ public class GameService {
                     .map(Player::getName)
                     .toList();
         } else {
-            // Innocents get their real revealed clues
-            clues = player.getRevealedClues();
+            // Innocents get their real revealed clues (extract text from PlayerClue)
+            clues = player.getRevealedClues().stream()
+                    .map(com.thecrime.domain.model.PlayerClue::getClue)
+                    .toList();
         }
+        
+        log.info("sendPlayerPackage to '{}': role={}, revealedClueCount={}, totalClues={}, cluesSending={}",
+                player.getName(), player.getRole(), player.getRevealedClueCount(), totalClues, clues.size());
         
         PlayerPackageDto dto = PlayerPackageDto.builder()
                 .role(pkg.getRole())

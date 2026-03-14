@@ -33,8 +33,7 @@ public class RoomController {
         GameRoom room = roomService.createRoom(
                 request.getHostName(),
                 request.getSetting(),
-                language,
-                request.getCriminalCount()
+                language
         );
         
         Player host = room.getHost();
@@ -84,5 +83,5 @@ public class RoomController {
                         ))
                         .toList()
         ));
-    }
+}
 }

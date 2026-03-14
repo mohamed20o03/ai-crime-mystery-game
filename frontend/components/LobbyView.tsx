@@ -1,12 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { GameState } from "@/lib/websocket";
 
 interface LobbyViewProps {
   gameState: GameState | null;
   isHost: boolean;
   playerId: string;
-  onStartGame: () => void;
+  onStartGame: (criminalCount: number) => void;
   onKickPlayer: (targetPlayerId: string) => void;
 }
 
@@ -18,7 +19,19 @@ export default function LobbyView({
   onKickPlayer,
 }: LobbyViewProps) {
   const players = gameState?.players || [];
-  const canStart = players.length >= 2;
+  const canStart = players.length >= 3; // min 3 players (including host)
+  const [criminalCount, setCriminalCount] = useState(1);
+
+  const maxCriminals = Math.max(1, Math.floor(players.length / 2));
+
+  // Available criminal count options based on current player count
+  const criminalOptions = Array.from(
+    { length: maxCriminals },
+    (_, i) => i + 1,
+  );
+
+  // Clamp selected criminal count if players leave
+  const effectiveCriminalCount = Math.min(criminalCount, maxCriminals);
 
   return (
     <div className="flex flex-col items-center">
@@ -58,7 +71,7 @@ export default function LobbyView({
           ))}
 
           {/* Empty slots */}
-          {Array.from({ length: Math.max(0, 2 - players.length) }).map(
+          {Array.from({ length: Math.max(0, 3 - players.length) }).map(
             (_, i) => (
               <div
                 key={`empty-${i}`}
@@ -71,17 +84,45 @@ export default function LobbyView({
         </div>
       </div>
 
+      {/* Criminal count selector (host only, shown when enough players) */}
+      {isHost && canStart && (
+        <div className="w-full max-w-md mb-6">
+          <label className="block text-sm font-medium mb-3 text-gray-300">
+            🔪 عدد المجرمين
+          </label>
+          <div className="flex gap-2">
+            {criminalOptions.map((count) => (
+              <button
+                key={count}
+                type="button"
+                onClick={() => setCriminalCount(count)}
+                className={`flex-1 py-3 rounded-lg font-bold text-lg transition-all border-2 ${
+                  effectiveCriminalCount === count
+                    ? "bg-crime-accent/20 border-crime-accent text-crime-accent"
+                    : "bg-crime-primary border-crime-light text-gray-400 hover:border-crime-accent/50"
+                }`}
+              >
+                {count}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {players.length} لاعبين في اللعبة — ينفع لحد {maxCriminals} مجرم
+          </p>
+        </div>
+      )}
+
       {/* Waiting message */}
       {!canStart && (
         <p className="text-gray-400 mb-4">
-          لازم يبقى فيه لاعبين على الأقل عشان نبدأ
+          لازم يبقى فيه ٣ على الأقل عشان نبدأ
         </p>
       )}
 
       {/* Start button (host only) */}
       {isHost && (
         <button
-          onClick={onStartGame}
+          onClick={() => onStartGame(effectiveCriminalCount)}
           disabled={!canStart}
           className="bg-crime-accent hover:bg-red-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-4 px-12 rounded-lg text-xl transition-all"
         >

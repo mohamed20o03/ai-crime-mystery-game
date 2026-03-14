@@ -156,18 +156,18 @@ export default function GameView({
           )}
         </div>
 
-        {/* ===== HOST CONTROLS: Start Round / Start Vote ===== */}
-        {phase === "GAME_ROUND" && isEliminated && (
-          <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-600/50 text-center">
-            <p className="text-gray-400">
-              👻 إنت اتشلت — بتتفرج على باقي اللعيبة
-            </p>
-          </div>
-        )}
-
-        {phase === "GAME_ROUND" && !isEliminated && (
+        {/* ===== HOST CONTROLS: Start Round / Start Vote (always visible for host) ===== */}
+        {phase === "GAME_ROUND" && isHost && (
           <div className="space-y-3">
-            {isHost && !gameState.roundClueRevealed && (
+            {isEliminated && (
+              <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-600/50 text-center mb-2">
+                <p className="text-gray-400 text-sm">
+                  👻 إنت اتشلت — بس لسه بتدير اللعبة
+                </p>
+              </div>
+            )}
+
+            {!gameState.roundClueRevealed && (
               <button
                 onClick={() => gameWebSocket.startRound()}
                 className="w-full bg-crime-accent hover:bg-red-600 text-white font-bold py-4 rounded-lg text-xl transition-all animate-pulse"
@@ -176,7 +176,7 @@ export default function GameView({
               </button>
             )}
 
-            {isHost && gameState.roundClueRevealed && (
+            {gameState.roundClueRevealed && (
               <button
                 onClick={() => gameWebSocket.startVoting()}
                 className="w-full bg-amber-700 hover:bg-amber-600 text-white font-bold py-4 rounded-lg text-xl transition-all"
@@ -185,7 +185,27 @@ export default function GameView({
               </button>
             )}
 
-            {!isHost && !gameState.roundClueRevealed && (
+            {gameState.message && gameState.roundClueRevealed && (
+              <p className="text-center text-green-400 text-sm animate-fade-in">
+                {gameState.message}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ===== GHOST MESSAGE (eliminated non-host) ===== */}
+        {phase === "GAME_ROUND" && isEliminated && !isHost && (
+          <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-600/50 text-center">
+            <p className="text-gray-400">
+              👻 إنت اتشلت — بتتفرج على باقي اللعيبة وبتشارك أدلتك
+            </p>
+          </div>
+        )}
+
+        {/* ===== NON-HOST, NON-ELIMINATED WAITING TEXT ===== */}
+        {phase === "GAME_ROUND" && !isEliminated && !isHost && (
+          <div className="space-y-3">
+            {!gameState.roundClueRevealed && (
               <p className="text-center text-gray-400 animate-pulse">
                 {gameState.currentRound === 0
                   ? "مستنيين الهوست يبدأ الجولة الأولى..."
@@ -193,7 +213,7 @@ export default function GameView({
               </p>
             )}
 
-            {!isHost && gameState.roundClueRevealed && (
+            {gameState.roundClueRevealed && (
               <p className="text-center text-gray-400 text-sm">
                 اتكلموا عن الأدلة... الهوست هيبدأ التصويت لما تبقوا جاهزين
               </p>

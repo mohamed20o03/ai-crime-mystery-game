@@ -19,7 +19,27 @@ Thumbs.db
 *.env
 
 # ===========================
+# Backend (Java / Maven)
+# ===========================
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/src/main/resources/application-local.yml
+
+# ===========================
+# Frontend (Node / Next.js)
+# ===========================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# ===========================
 # Logs
 # ===========================
 *.log
 logs/
+
+# ===========================
+# AI Agent / Gemini workspace
+# ===========================
+.gemini/
+.agents/

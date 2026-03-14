@@ -79,6 +79,12 @@ export default function GameRoom() {
         sessionStorage.clear();
         router.push("/?kicked=true");
         break;
+      case "ROOM_CLOSED":
+        gameWebSocket.disconnect();
+        sessionStorage.clear();
+        alert(msg.message || "الهوست قفل الأوضة.");
+        router.push("/");
+        break;
       case "ROOM_RESET":
         setPlayerPackage(null);
         setGameOverData(null);
@@ -177,6 +183,18 @@ export default function GameRoom() {
                   👥 اللعيبة
                 </button>
               )}
+            {isHost && (
+              <button
+                onClick={() => {
+                  if (confirm("متأكد إنك عايز تقفل الأوضة؟ كل اللعيبة هتطرد فوراً.")) {
+                    gameWebSocket.closeRoom();
+                  }
+                }}
+                className="text-xs bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-700 px-3 py-1 rounded transition-all"
+              >
+                ✕ قفل الأوضة
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -249,7 +267,7 @@ export default function GameRoom() {
           gameState={gameState}
           isHost={isHost}
           playerId={playerId}
-          onStartGame={() => gameWebSocket.startGame()}
+          onStartGame={(criminalCount) => gameWebSocket.startGame(criminalCount)}
           onKickPlayer={(targetId) => gameWebSocket.kickPlayer(targetId)}
         />
       )}
