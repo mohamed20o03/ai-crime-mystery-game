@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.*;
 import java.util.function.Consumer;
@@ -89,76 +90,97 @@ public class ScenarioGeneratorService {
     // ─────────────────────────────────────────────────────────────────────────
 
     public void generateScenario(GameRoom room, List<String> playerNames, Consumer<Boolean> callback) {
-        try {
-            // ── 0. Create English Markers Mapping ────────────────────────
-            Map<String, String> markerToName = new java.util.LinkedHashMap<>();
-            List<String> markerNames = new java.util.ArrayList<>();
-            char letter = 'A';
-            for (String name : playerNames) {
-                String marker = "PLAYER_" + letter++;
-                markerToName.put(marker, name);
-                markerNames.add(marker);
-            }
-            log.info("Mapped players to markers: {}", markerToName);
-
-            // ── Call 1: Full narrative story ────────────────────────────
-            log.info("[Step 1/3] Generating full narrative story...");
-            String foundationRaw = extractJson(callGeminiApi(buildFoundationPrompt(room, markerNames)));
-            JsonNode foundationWithMarkers = objectMapper.readTree(foundationRaw);
-            log.info("[Step 1/3] Foundation generated.");
-
-            // ── Call 2: Extract clues FROM the story ────────────────────
-            log.info("[Step 2/3] Extracting clues from story...");
-            String cluesRaw = extractJson(callGeminiApi(buildCluesPrompt(foundationWithMarkers, markerNames))); 
-            JsonNode cluesWithMarkers = objectMapper.readTree(cluesRaw);
-            log.info("[Step 2/3] Clues generated.");
-
-            // ── Call 3: Testimonies built around hooks ───────────────────
-            log.info("[Step 3/3] Generating testimonies...");
-            String testimoniesRaw = extractJson(callGeminiApi(buildTestimoniesPrompt(foundationWithMarkers, cluesWithMarkers)));
-            log.info("[Step 3/3] Testimonies generated.");
-
-            // ── Reverse map markers back to Arabic names ─────────────────
-            for (Map.Entry<String, String> entry : markerToName.entrySet()) {
-                foundationRaw = foundationRaw.replace(entry.getKey(), entry.getValue());
-                cluesRaw = cluesRaw.replace(entry.getKey(), entry.getValue());
-                testimoniesRaw = testimoniesRaw.replace(entry.getKey(), entry.getValue());
-            }
-
-            JsonNode foundation = objectMapper.readTree(foundationRaw);
-            JsonNode clues = objectMapper.readTree(cluesRaw);
-            JsonNode testimonies = objectMapper.readTree(testimoniesRaw);
-
-            log.info("===== FOUNDATION JSON =====\n{}", foundation.toPrettyString());
-            log.info("===== CLUES JSON =====\n{}", clues.toPrettyString());
-            log.info("===== TESTIMONIES JSON =====\n{}", testimonies.toPrettyString());
-
-            // ── Assemble everything into PlayerPackages ──────────────────
-            assemblePackages(room, foundation, clues, testimonies);
-
-            // ── Validate hooks (Soft Validation) ─────────────────────────
-            List<String> violations = validateHooks(room);
-            if (!violations.isEmpty()) {
-                violations.forEach(v -> log.warn("⚠️ Hook Warning (game continues): {}", v));
-            }
-
-            // ── Check no player is missing a package ─────────────────────
-            List<String> missing = room.getAllPlayers().stream()
-                .filter(p -> p.getPlayerPackage() == null)
-                .map(Player::getName).toList();
-            if (!missing.isEmpty()) {
-                log.error("Missing packages for: {}", missing);
-                callback.accept(false);
-                return;
-            }
-
-            log.info("Scenario generation complete for room {}", room.getRoomCode());
-            callback.accept(true);
-
-        } catch (Exception e) {
-            log.error("Error generating scenario", e);
-            callback.accept(false);
+        // ── 0. Create English Markers Mapping ────────────────────────
+        Map<String, String> markerToName = new java.util.LinkedHashMap<>();
+        List<String> markerNames = new java.util.ArrayList<>();
+        char letter = 'A';
+        for (String name : playerNames) {
+            String marker = "PLAYER_" + letter++;
+            markerToName.put(marker, name);
+            markerNames.add(marker);
         }
+        log.info("Mapped players to markers: {}", markerToName);
+
+        // ── Reactive chain: Foundation → Clues → Testimonies ─────────
+        log.info("[Step 1/3] Generating full narrative story...");
+
+        callGeminiReactive(buildFoundationPrompt(room, markerNames))
+            .map(this::parse)
+            .doOnNext(f -> log.info("[Step 1/3] Foundation generated."))
+            .flatMap(foundationWithMarkers -> {
+                log.info("[Step 2/3] Extracting clues from story...");
+                return callGeminiReactive(buildCluesPrompt(foundationWithMarkers, markerNames))
+                    .map(this::parse)
+                    .doOnNext(c -> log.info("[Step 2/3] Clues generated."))
+                    .map(cluesWithMarkers -> new JsonNode[]{ foundationWithMarkers, cluesWithMarkers });
+            })
+            .flatMap(pair -> {
+                JsonNode foundationWithMarkers = pair[0];
+                JsonNode cluesWithMarkers = pair[1];
+                log.info("[Step 3/3] Generating testimonies...");
+                return callGeminiReactive(buildTestimoniesPrompt(foundationWithMarkers, cluesWithMarkers))
+                    .map(this::parse)
+                    .doOnNext(t -> log.info("[Step 3/3] Testimonies generated."))
+                    .map(testimoniesNode -> new JsonNode[]{ foundationWithMarkers, cluesWithMarkers, testimoniesNode });
+            })
+            .subscribe(
+                results -> {
+                    try {
+                        JsonNode foundationWithMarkers = results[0];
+                        JsonNode cluesWithMarkers = results[1];
+                        JsonNode testimoniesWithMarkers = results[2];
+
+                        // ── Reverse map markers back to Arabic names ─────
+                        String foundationRaw = foundationWithMarkers.toString();
+                        String cluesRaw = cluesWithMarkers.toString();
+                        String testimoniesRaw = testimoniesWithMarkers.toString();
+
+                        for (Map.Entry<String, String> entry : markerToName.entrySet()) {
+                            foundationRaw = foundationRaw.replace(entry.getKey(), entry.getValue());
+                            cluesRaw = cluesRaw.replace(entry.getKey(), entry.getValue());
+                            testimoniesRaw = testimoniesRaw.replace(entry.getKey(), entry.getValue());
+                        }
+
+                        JsonNode foundation = objectMapper.readTree(foundationRaw);
+                        JsonNode clues = objectMapper.readTree(cluesRaw);
+                        JsonNode testimonies = objectMapper.readTree(testimoniesRaw);
+
+                        log.info("===== FOUNDATION JSON =====\n{}", foundation.toPrettyString());
+                        log.info("===== CLUES JSON =====\n{}", clues.toPrettyString());
+                        log.info("===== TESTIMONIES JSON =====\n{}", testimonies.toPrettyString());
+
+                        // ── Assemble everything into PlayerPackages ──────
+                        assemblePackages(room, foundation, clues, testimonies);
+
+                        // ── Validate hooks (Soft Validation) ─────────────
+                        List<String> violations = validateHooks(room);
+                        if (!violations.isEmpty()) {
+                            violations.forEach(v -> log.warn("⚠️ Hook Warning (game continues): {}", v));
+                        }
+
+                        // ── Check no player is missing a package ─────────
+                        List<String> missing = room.getAllPlayers().stream()
+                            .filter(p -> p.getPlayerPackage() == null)
+                            .map(Player::getName).toList();
+                        if (!missing.isEmpty()) {
+                            log.error("Missing packages for: {}", missing);
+                            callback.accept(false);
+                            return;
+                        }
+
+                        log.info("Scenario generation complete for room {}", room.getRoomCode());
+                        callback.accept(true);
+
+                    } catch (Exception e) {
+                        log.error("Error assembling scenario", e);
+                        callback.accept(false);
+                    }
+                },
+                error -> {
+                    log.error("Error generating scenario", error);
+                    callback.accept(false);
+                }
+            );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -479,7 +501,7 @@ public class ScenarioGeneratorService {
         player.setRole(role);
 
         if (role == PlayerRole.CRIMINAL && clues != null) {
-            String warning = "⚠️ تنبيه: الدليل متفبرك، القرار ليك إنك تستخدمه أو تخترع واحد.\\n\\n";
+            String warning = "⚠️ تنبيه: الدليل متفبرك، القرار ليك إنك تستخدمه أو تخترع واحد.\n\n";
             clues.forEach(c -> c.setClue(warning + c.getClue()));
         }
 
@@ -540,14 +562,10 @@ public class ScenarioGeneratorService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Gemini API
+    // Gemini API (Reactive)
     // ─────────────────────────────────────────────────────────────────────────
 
-    private JsonNode callAndParse(String userPrompt) throws Exception {
-        return objectMapper.readTree(extractJson(callGeminiApi(userPrompt)));
-    }
-
-    private String callGeminiApi(String userPrompt) {
+    private Mono<String> callGeminiReactive(String userPrompt) {
         Map<String, Object> body = Map.of(
             "system_instruction", Map.of("parts", List.of(Map.of("text", SYSTEM_PROMPT))),
             "contents",           List.of(Map.of("role", "user",
@@ -555,14 +573,20 @@ public class ScenarioGeneratorService {
             "generationConfig",   GENERATION_CONFIG
         );
 
-        String raw = geminiWebClient.post()
+        return geminiWebClient.post()
             .uri("/models/{m}:generateContent?key={k}", model, apiKey)
             .bodyValue(body)
             .retrieve()
             .bodyToMono(String.class)
-            .block();
+            .map(this::extractText);
+    }
 
-        return extractText(raw);
+    private JsonNode parse(String raw) {
+        try {
+            return objectMapper.readTree(extractJson(raw));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse AI response as JSON", e);
+        }
     }
 
     private String extractText(String response) {

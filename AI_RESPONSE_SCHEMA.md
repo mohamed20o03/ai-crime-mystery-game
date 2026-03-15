@@ -2,7 +2,7 @@
 
 > Part of [The Crime](README.md) — a real-time multiplayer murder mystery game powered by Gemini AI.
 
-The scenario is generated through **3 sequential Gemini API calls**. Each call returns JSON with `responseMimeType: "application/json"`.  
+The scenario is generated through **3 reactive Gemini API calls** (using `flatMap` chains). Each call returns JSON with `responseMimeType: "application/json"`.  
 Every string value is in **Egyptian Arabic dialect (العامية المصرية)**.
 
 ---
@@ -190,7 +190,7 @@ The backend (`GameService.sendPlayerPackage`) filters data before sending:
 | `role`                 | ✅                                        | ✅                   |
 | `characterDescription` | ✅                                        | ✅                   |
 | `mustSayTestimony`     | ✅                                        | ✅                   |
-| `privateClues`         | ❌ Replaced with misleading message       | ✅ Real clues        |
+| `privateClues`         | ✅ RED_HERRING clues (with ⚠️ warning prefix) | ✅ Real clues        |
 | `totalClueCount`       | ✅ (shows X of Y)                         | ✅                   |
 | `fellowCriminals`      | ✅ (names of co-criminals)                | ❌ null              |
 | `master_timeline`      | ❌ Never                                  | ❌ Never             |

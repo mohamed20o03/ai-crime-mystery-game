@@ -18,7 +18,7 @@ public class PlayerPackageDto {
     private String mustSayTestimony;
     
     // Only the revealed clues (gradual reveal)
-    // For criminals: contains misleading messages instead of real clues
+    // For criminals: contains RED_HERRING clues with a warning prefix
     private List<String> privateClues;
     
     // Total clues available (so frontend can show "X of Y")

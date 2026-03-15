@@ -29,9 +29,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GameService {
     
-    private static final String CRIMINAL_CLUE_MESSAGE = 
-            "فكّر جيداً في خلق تفسير مضلل أو شبهة كاذبة يمكن أن تجعل لاعباً بريئاً يبدو مذنباً.";
-    
     private final RoomService roomService;
     private final ScenarioGeneratorService scenarioGenerator;
     private final WebSocketService webSocketService;
@@ -159,7 +156,6 @@ public class GameService {
     
     /**
      * Host presses "Start Round N" → reveal one clue per active player.
-     * Criminals get a misleading message instead.
      */
     public void startRound(String roomCode, String requestingPlayerId) {
         GameRoom room = roomService.getRoom(roomCode);
@@ -386,7 +382,6 @@ public class GameService {
     
     /**
      * Send private package to a player.
-     * For criminals: replace clues with misleading messages.
      */
     private void sendPlayerPackage(String roomCode, Player player, GameRoom room) {
         if (player.getPlayerPackage() == null) {
